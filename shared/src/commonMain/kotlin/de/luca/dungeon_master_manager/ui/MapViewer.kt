@@ -1,5 +1,6 @@
 package de.luca.dungeon_master_manager.ui
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -47,6 +48,9 @@ fun MapViewer(
     }
 
     var scale by remember { mutableStateOf(1f) }
+    val animatedScale = animateFloatAsState(
+        targetValue = scale
+    )
     var offsetX by remember { mutableStateOf(0f) }
     var offsetY by remember { mutableStateOf(0f) }
 
@@ -141,8 +145,8 @@ fun MapViewer(
                     modifier = Modifier
                         .align(Alignment.Center)
                         .graphicsLayer(
-                            scaleX = scale,
-                            scaleY = scale,
+                            scaleX = animatedScale.value,
+                            scaleY = animatedScale.value,
                             translationX = offsetX,
                             translationY = offsetY
                         )
