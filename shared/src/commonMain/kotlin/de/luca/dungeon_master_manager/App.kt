@@ -1,28 +1,49 @@
 package de.luca.dungeon_master_manager
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.safeContentPadding
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.material3.Surface
+import androidx.compose.material3.darkColorScheme
+import de.luca.dungeon_master_manager.data.EntityPopoutRequest
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
-import org.jetbrains.compose.resources.painterResource
+import androidx.compose.foundation.layout.fillMaxSize
+import de.luca.dungeon_master_manager.data.ProjectInfo
+import de.luca.dungeon_master_manager.ui.ProjectEditorScreen
+import de.luca.dungeon_master_manager.ui.ProjectLauncherScreen
+import de.luca.dungeon_master_manager.viewmodel.ProjectEditorViewModel
 
-import dungeon_master_manager.shared.generated.resources.Res
-import dungeon_master_manager.shared.generated.resources.compose_multiplatform
+sealed class Screen {
+    data object Launcher : Screen()
+    data class Editor(val project: ProjectInfo) : Screen()
+}
 
 @Composable
-@Preview
-fun App() {
-    MaterialTheme {
+fun App(
+    onOpenEntityPopout: (EntityPopoutRequest) -> Unit = {}
+) {
+    var currentScreen by remember { mutableStateOf<Screen>(Screen.Launcher) }
 
+    MaterialTheme(colorScheme = darkColorScheme()) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background,
+        ) {
+            when (val screen = currentScreen) {
+                is Screen.Launcher -> ProjectLauncherScreen(
+                    onProjectSelected = { currentScreen = Screen.Editor(it) }
+                )
+                is Screen.Editor -> {
+                    // key() ensures ViewModel is recreated when switching projects
+                    key(screen.project.path) {
+                        val viewModel = remember { ProjectEditorViewModel(screen.project) }
+                        ProjectEditorScreen(
+                            viewModel = viewModel,
+                            onBackToLauncher = { currentScreen = Screen.Launcher },
+                            onOpenEntityPopout = onOpenEntityPopout,
+                        )
+                    }
+                }
+            }
+        }
     }
 }

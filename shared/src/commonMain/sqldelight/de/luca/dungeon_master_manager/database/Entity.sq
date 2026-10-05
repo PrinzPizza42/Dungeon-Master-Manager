@@ -1,0 +1,28 @@
+CREATE TABLE Entity (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    color TEXT,
+    notesFilePath TEXT
+);
+
+selectAll:
+SELECT * FROM Entity;
+
+selectById:
+SELECT * FROM Entity WHERE id = ?;
+
+selectByType:
+SELECT * FROM Entity WHERE type = ?;
+
+insertEntity:
+INSERT INTO Entity(name, type, color, notesFilePath)
+VALUES (?, ?, ?, ?);
+
+updateEntity:
+UPDATE Entity
+SET name = ?, type = ?, color = ?, notesFilePath = ?
+WHERE id = ?;
+
+deleteEntity:
+DELETE FROM Entity WHERE id = ?;
