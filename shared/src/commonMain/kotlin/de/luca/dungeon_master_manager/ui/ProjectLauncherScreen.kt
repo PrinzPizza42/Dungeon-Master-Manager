@@ -29,7 +29,7 @@ fun ProjectLauncherScreen(
     var showCreateDialog by remember { mutableStateOf(false) }
     var projectToDelete by remember { mutableStateOf<ProjectInfo?>(null) }
     
-    val entityViewModel = remember { EntityViewModel(null) }
+    val entityViewModel = remember { EntityViewModel(null, null) }
     var showGlobalEntityDialog by remember { mutableStateOf(false) }
 
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {

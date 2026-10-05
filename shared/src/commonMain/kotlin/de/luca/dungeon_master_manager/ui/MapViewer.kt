@@ -20,12 +20,9 @@ import androidx.compose.ui.input.pointer.isPrimaryPressed
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.loadImageBitmap
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import de.luca.dungeon_master_manager.data.MapData
 import de.luca.dungeon_master_manager.data.MapMarker
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
@@ -53,7 +50,10 @@ fun MapViewer(
     var offsetX by remember { mutableStateOf(0f) }
     var offsetY by remember { mutableStateOf(0f) }
 
-    val viewModel = remember(projectPath) { de.luca.dungeon_master_manager.viewmodel.EntityViewModel(projectPath) }
+    val viewModel = remember(projectPath) { de.luca.dungeon_master_manager.viewmodel.EntityViewModel(
+        projectPath,
+        null
+    ) }
     val projectEnts by viewModel.projectEntities.collectAsState()
     val globalEnts by viewModel.globalEntities.collectAsState()
     

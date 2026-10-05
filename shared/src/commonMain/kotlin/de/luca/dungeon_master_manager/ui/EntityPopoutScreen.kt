@@ -6,9 +6,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import de.luca.dungeon_master_manager.data.DatabaseHelper
 import de.luca.dungeon_master_manager.data.EntityPopoutRequest
-import de.luca.dungeonmastermanager.database.Entity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -23,7 +21,10 @@ fun EntityPopoutScreen(
     onOpenEntityPopout: (EntityPopoutRequest) -> Unit
 ) {
     val coroutineScope = rememberCoroutineScope()
-    val viewModel = remember(request.projectPath) { de.luca.dungeon_master_manager.viewmodel.EntityViewModel(request.projectPath) }
+    val viewModel = remember(request.projectPath) { de.luca.dungeon_master_manager.viewmodel.EntityViewModel(
+        request.projectPath,
+        null
+    ) }
     var showEditDialog by remember { mutableStateOf(false) }
 
     val projectEnts by viewModel.projectEntities.collectAsState()

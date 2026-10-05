@@ -8,8 +8,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import de.luca.dungeon_master_manager.data.EditorTab
-import de.luca.dungeon_master_manager.data.ProjectInfo
 import de.luca.dungeon_master_manager.viewmodel.ProjectEditorViewModel
 
 /**
@@ -32,7 +30,7 @@ fun ProjectEditorScreen(
 
     val activeTab = openTabs.find { it.filePath == activeTabPath }
     
-    val entityViewModel = remember(viewModel.project.path) { de.luca.dungeon_master_manager.viewmodel.EntityViewModel(viewModel.project.path) }
+    val entityViewModel = remember(viewModel.project.path) { de.luca.dungeon_master_manager.viewmodel.EntityViewModel(viewModel.project.path, viewModel) }
     var showEntityDialog by remember { mutableStateOf(false) }
 
     val projectEnts by entityViewModel.projectEntities.collectAsState()

@@ -2,6 +2,7 @@ package de.luca.dungeon_master_manager.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
 import de.luca.dungeon_master_manager.data.DatabaseHelper
 import de.luca.dungeonmastermanager.database.Entity
 import kotlinx.coroutines.Dispatchers
@@ -13,7 +14,7 @@ import kotlinx.coroutines.withContext
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
 
-class EntityViewModel(private val projectPath: String?) : ViewModel() {
+class EntityViewModel(private val projectPath: String?, private val viewModel: ProjectEditorViewModel?) : ViewModel() {
 
     private val _projectEntities = MutableStateFlow<List<Entity>>(emptyList())
     val projectEntities: StateFlow<List<Entity>> = _projectEntities
@@ -124,6 +125,8 @@ class EntityViewModel(private val projectPath: String?) : ViewModel() {
             """.trimIndent()
             file.writeText(template)
         }
+
+        viewModel?.loadFileTree()
 
         return "$pluralType${java.io.File.separator}${file.name}"
     }
