@@ -30,7 +30,6 @@ fun ContentArea(
     Box(modifier = modifier.fillMaxSize()) {
         when {
             activeTab == null -> {
-                // No tab open — show welcome
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
@@ -63,7 +62,7 @@ fun ContentArea(
             }
 
             else -> {
-                // Dispatch based on file extension
+                // Use viewer based on file extension
                 when (activeTab.extension) {
                     "md" -> key(activeTab.filePath) {
                         MarkdownEditor(

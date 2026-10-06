@@ -194,7 +194,7 @@ fun CreateEntityDialog(
 ) {
     var name by remember { mutableStateOf(initialEntity?.name ?: "") }
     var type by remember { mutableStateOf(initialEntity?.type ?: "NPC") }
-    var color by remember { mutableStateOf(initialEntity?.color ?: Color.Red.value.toString()) } // Store as ULong string
+    var color by remember { mutableStateOf(initialEntity?.color ?: Color.Red.value.toString()) }
     var notesPath by remember { mutableStateOf(initialEntity?.notesFilePath ?: "") }
     var showFileSelector by remember { mutableStateOf(false) }
 

@@ -132,7 +132,7 @@ fun ProjectLauncherScreen(
         }
     }
 
-    // — Create Dialog —
+    // Create Dialog
     if (showCreateDialog) {
         CreateProjectDialog(
             onDismiss = { showCreateDialog = false },
@@ -143,7 +143,7 @@ fun ProjectLauncherScreen(
         )
     }
 
-    // — Delete Confirmation —
+    // Delete Confirmation
     projectToDelete?.let { project ->
         AlertDialog(
             onDismissRequest = { projectToDelete = null },

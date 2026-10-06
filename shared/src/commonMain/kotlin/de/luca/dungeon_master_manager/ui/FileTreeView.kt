@@ -41,7 +41,6 @@ fun FileTreeView(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier) {
-        // Show the root's children directly (the root is the project folder itself)
         for (child in rootNode.children) {
             FileTreeNodeRow(
                 node = child,

@@ -30,7 +30,6 @@ object DatabaseHelper {
     private fun createDatabase(dbFile: File): AppDatabase {
         val driver = JdbcSqliteDriver("jdbc:sqlite:${dbFile.absolutePath}")
         
-        // Check if we need to create the schema (basic check for SQLite)
         if (!dbFile.exists() || dbFile.length() == 0L) {
             AppDatabase.Schema.create(driver)
         }

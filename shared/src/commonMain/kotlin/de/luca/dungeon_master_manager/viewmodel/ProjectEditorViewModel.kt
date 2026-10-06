@@ -15,21 +15,21 @@ class ProjectEditorViewModel(
 ) : ViewModel() {
     private val fileService = FileService()
 
-    // -- File tree --
+    // File tree
     private val _fileTree = MutableStateFlow<FileNode?>(null)
     val fileTree: StateFlow<FileNode?> = _fileTree
 
     private val _expandedPaths = MutableStateFlow<Set<String>>(emptySet())
     val expandedPaths: StateFlow<Set<String>> = _expandedPaths
 
-    // -- Tabs --
+    // Tabs
     private val _openTabs = MutableStateFlow<List<EditorTab>>(emptyList())
     val openTabs: StateFlow<List<EditorTab>> = _openTabs
 
     private val _activeTabPath = MutableStateFlow<String?>(null)
     val activeTabPath: StateFlow<String?> = _activeTabPath
 
-    // -- File content for active tab --
+    // File content for active tab
     private val _activeFileContent = MutableStateFlow<String?>(null)
     val activeFileContent: StateFlow<String?> = _activeFileContent
 
@@ -128,7 +128,7 @@ class ProjectEditorViewModel(
         val newTabs = tabs.filterIndexed { i, _ -> i != index }
         _openTabs.value = newTabs
 
-        // If we closed the active tab, pick a new one
+        // If active tab is closed, pick a new one
         if (_activeTabPath.value == filePath) {
             val newActive = when {
                 newTabs.isEmpty() -> null
@@ -156,7 +156,7 @@ class ProjectEditorViewModel(
             kotlinx.coroutines.delay(500) // Debounce 500ms
             try {
                 fileService.writeFile(activePath, newContent)
-                // If it's a story file, reload tree to update outline
+                // If its a story file, reload tree to update outline
                 if (activePath.contains("Story")) {
                     loadFileTree()
                 }
