@@ -26,6 +26,10 @@ class ProjectEditorViewModel(
     private val _openTabs = MutableStateFlow<List<EditorTab>>(emptyList())
     val openTabs: StateFlow<List<EditorTab>> = _openTabs
 
+    data class PoppedOutTab(val tab: EditorTab, val focusTrigger: Int = 0)
+    private val _poppedOutTabs = MutableStateFlow<List<PoppedOutTab>>(emptyList())
+    val poppedOutTabs: StateFlow<List<PoppedOutTab>> = _poppedOutTabs
+
     private val _activeTabPath = MutableStateFlow<String?>(null)
     val activeTabPath: StateFlow<String?> = _activeTabPath
 
@@ -84,6 +88,50 @@ class ProjectEditorViewModel(
         }
     }
 
+    fun popOutTab(filePath: String) {
+        val tab = _openTabs.value.find { it.filePath == filePath } ?: return
+        closeTab(filePath)
+        if (!_poppedOutTabs.value.any { it.tab.filePath == filePath }) {
+            _poppedOutTabs.value = _poppedOutTabs.value + PoppedOutTab(tab)
+        }
+    }
+
+    fun openAsWindow(node: FileNode) {
+        if (node.isDirectory) return
+
+        val actualPath = if (node.isVirtualHeading) {
+            node.path.substringBefore("::heading::")
+        } else {
+            node.path
+        }
+        val actualName = if (node.isVirtualHeading) actualPath.substringAfterLast(java.io.File.separator) else node.name
+        val actualExtension = if (node.isVirtualHeading) "md" else node.extension
+
+        // Check if already popped out, focus it if so
+        val poppedIndex = _poppedOutTabs.value.indexOfFirst { it.tab.filePath == actualPath }
+        if (poppedIndex != -1) {
+            val old = _poppedOutTabs.value[poppedIndex]
+            val newList = _poppedOutTabs.value.toMutableList()
+            newList[poppedIndex] = old.copy(focusTrigger = old.focusTrigger + 1)
+            _poppedOutTabs.value = newList
+            return
+        }
+
+        // Close it from main tabs if it's there
+        closeTab(actualPath)
+
+        val tab = EditorTab(
+            filePath = actualPath,
+            fileName = actualName,
+            extension = actualExtension,
+        )
+        _poppedOutTabs.value = _poppedOutTabs.value + PoppedOutTab(tab)
+    }
+
+    fun closePoppedOutTab(filePath: String) {
+        _poppedOutTabs.value = _poppedOutTabs.value.filter { it.tab.filePath != filePath }
+    }
+
     /** Open a file in a tab (or switch to it if already open). */
     fun openFile(node: FileNode) {
         if (node.isDirectory) {
@@ -98,6 +146,16 @@ class ProjectEditorViewModel(
         }
         val actualName = if (node.isVirtualHeading) actualPath.substringAfterLast(java.io.File.separator) else node.name
         val actualExtension = if (node.isVirtualHeading) "md" else node.extension
+
+        // Check if it's already popped out
+        val poppedIndex = _poppedOutTabs.value.indexOfFirst { it.tab.filePath == actualPath }
+        if (poppedIndex != -1) {
+            val old = _poppedOutTabs.value[poppedIndex]
+            val newList = _poppedOutTabs.value.toMutableList()
+            newList[poppedIndex] = old.copy(focusTrigger = old.focusTrigger + 1)
+            _poppedOutTabs.value = newList
+            return
+        }
 
         // Add tab if not already open
         val existingTab = _openTabs.value.find { it.filePath == actualPath }

@@ -19,6 +19,7 @@ sealed class Screen {
 
 @Composable
 fun App(
+    applicationScope: androidx.compose.ui.window.ApplicationScope? = null,
     onOpenEntityPopout: (EntityPopoutRequest) -> Unit = {}
 ) {
     var currentScreen by remember { mutableStateOf<Screen>(Screen.Launcher) }
@@ -38,6 +39,7 @@ fun App(
                         val viewModel = remember { ProjectEditorViewModel(screen.project) }
                         ProjectEditorScreen(
                             viewModel = viewModel,
+                            applicationScope = applicationScope,
                             onBackToLauncher = { currentScreen = Screen.Launcher },
                             onOpenEntityPopout = onOpenEntityPopout,
                         )

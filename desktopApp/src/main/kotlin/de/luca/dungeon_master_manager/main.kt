@@ -13,6 +13,7 @@ fun main() = application {
         title = "Dungeon-Master-Manager",
     ) {
         App(
+            applicationScope = this@application,
             onOpenEntityPopout = { request ->
                 if (!openEntityWindows.contains(request)) {
                     openEntityWindows.add(request)

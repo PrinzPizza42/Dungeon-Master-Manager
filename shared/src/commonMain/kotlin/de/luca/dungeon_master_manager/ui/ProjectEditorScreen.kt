@@ -22,6 +22,7 @@ import java.awt.Cursor
 @Composable
 fun ProjectEditorScreen(
     viewModel: ProjectEditorViewModel,
+    applicationScope: androidx.compose.ui.window.ApplicationScope?,
     onBackToLauncher: () -> Unit,
     onOpenEntityPopout: (EntityPopoutRequest) -> Unit,
 ) {
@@ -68,6 +69,7 @@ fun ProjectEditorScreen(
                 onRenameFile = { node, newName -> viewModel.renameFile(node, newName) },
                 onMoveFile = { node, folder -> viewModel.moveFile(node, folder) },
                 onDeleteFile = { node -> viewModel.deleteFile(node) },
+                onPopOutClick = { node -> viewModel.openAsWindow(node) },
                 onOpenNativeExplorer = {
                     try {
                         val file = java.io.File(viewModel.project.path)
@@ -91,6 +93,7 @@ fun ProjectEditorScreen(
                     activeTabPath = activeTabPath,
                     onTabSelect = { viewModel.selectTab(it) },
                     onTabClose = { viewModel.closeTab(it) },
+                    onTabPopOut = { viewModel.popOutTab(it) },
                 )
 
                 if (openTabs.isNotEmpty()) {
@@ -119,10 +122,75 @@ fun ProjectEditorScreen(
     }
 
     if (showEntityDialog) {
-        de.luca.dungeon_master_manager.ui.EntityManagerDialog(
+        EntityManagerDialog(
             isGlobalOnly = false,
             viewModel = entityViewModel,
             onDismiss = { showEntityDialog = false }
+        )
+    }
+
+    val poppedOutTabs by viewModel.poppedOutTabs.collectAsState()
+    if (applicationScope != null) {
+        with(applicationScope) {
+            for (poppedOut in poppedOutTabs) {
+                androidx.compose.ui.window.Window(
+                    onCloseRequest = { viewModel.closePoppedOutTab(poppedOut.tab.filePath) },
+                    title = poppedOut.tab.fileName,
+                ) {
+                    LaunchedEffect(poppedOut.focusTrigger) {
+                        window.toFront()
+                        window.requestFocus()
+                    }
+                    StandaloneFileEditorWindow(
+                        tab = poppedOut.tab,
+                        projectPath = viewModel.project.path,
+                        entityColors = entityColors,
+                        onOpenEntityPopout = { entityName ->
+                            onOpenEntityPopout(EntityPopoutRequest(entityName, viewModel.project.path))
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun StandaloneFileEditorWindow(
+    tab: de.luca.dungeon_master_manager.data.EditorTab,
+    projectPath: String,
+    entityColors: Map<String, String>,
+    onOpenEntityPopout: (String) -> Unit
+) {
+    var fileContent by remember { mutableStateOf<String?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
+    
+    LaunchedEffect(tab.filePath) {
+        isLoading = true
+        fileContent = de.luca.dungeon_master_manager.data.FileService().readFile(tab.filePath)
+        isLoading = false
+    }
+
+    var contentToSave by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(contentToSave) {
+        contentToSave?.let { content ->
+            kotlinx.coroutines.delay(500)
+            de.luca.dungeon_master_manager.data.FileService().writeFile(tab.filePath, content)
+        }
+    }
+
+    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        ContentArea(
+            activeTab = tab,
+            fileContent = fileContent,
+            isLoading = isLoading,
+            onContentChange = { 
+                fileContent = it
+                contentToSave = it 
+            },
+            onOpenEntityPopout = onOpenEntityPopout,
+            entityColors = entityColors,
+            projectPath = projectPath
         )
     }
 }
@@ -170,6 +238,7 @@ private fun EditorSidebar(
     onRenameFile: (de.luca.dungeon_master_manager.data.FileNode, String) -> Unit,
     onMoveFile: (de.luca.dungeon_master_manager.data.FileNode, String) -> Unit,
     onDeleteFile: (de.luca.dungeon_master_manager.data.FileNode) -> Unit,
+    onPopOutClick: (de.luca.dungeon_master_manager.data.FileNode) -> Unit,
     onOpenNativeExplorer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -230,6 +299,7 @@ private fun EditorSidebar(
                         onRenameClick = { fileToRename = it },
                         onMoveClick = { fileToMove = it },
                         onDeleteClick = { fileToDelete = it },
+                        onPopOutClick = onPopOutClick,
                     )
                 }
             } else {

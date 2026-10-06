@@ -38,6 +38,7 @@ fun FileTreeView(
     onRenameClick: (FileNode) -> Unit,
     onMoveClick: (FileNode) -> Unit,
     onDeleteClick: (FileNode) -> Unit,
+    onPopOutClick: (FileNode) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier) {
@@ -51,6 +52,7 @@ fun FileTreeView(
                 onRenameClick = onRenameClick,
                 onMoveClick = onMoveClick,
                 onDeleteClick = onDeleteClick,
+                onPopOutClick = onPopOutClick,
             )
         }
     }
@@ -67,6 +69,7 @@ private fun FileTreeNodeRow(
     onRenameClick: (FileNode) -> Unit,
     onMoveClick: (FileNode) -> Unit,
     onDeleteClick: (FileNode) -> Unit,
+    onPopOutClick: (FileNode) -> Unit,
 ) {
     val isExpanded = node.path in expandedPaths
     val isActive = node.path == activeFilePath
@@ -137,6 +140,15 @@ private fun FileTreeNodeRow(
             onDismissRequest = { showMenu = false }
         ) {
             if (!node.isVirtualHeading) {
+                if(!node.isDirectory) {
+                    DropdownMenuItem(
+                        text = { Text("Open as window") },
+                        onClick = {
+                            showMenu = false
+                            onPopOutClick(node)
+                        }
+                    )
+                }
                 DropdownMenuItem(
                     text = { Text("Rename") },
                     onClick = {
@@ -174,6 +186,7 @@ private fun FileTreeNodeRow(
                 onRenameClick = onRenameClick,
                 onMoveClick = onMoveClick,
                 onDeleteClick = onDeleteClick,
+                onPopOutClick = onPopOutClick,
             )
         }
     }
