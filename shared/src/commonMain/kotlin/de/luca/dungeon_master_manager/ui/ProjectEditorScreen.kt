@@ -143,7 +143,7 @@ private fun EditorToolbar(
             }
             Spacer(Modifier.width(12.dp))
             Text(
-                "⚔ $projectName",
+                projectName,
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary,
             )

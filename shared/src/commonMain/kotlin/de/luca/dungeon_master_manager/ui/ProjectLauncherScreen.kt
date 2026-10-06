@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -44,12 +46,12 @@ fun ProjectLauncherScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "⚔ Dungeon Master Manager",
+                    "Dungeon Master Manager",
                     style = MaterialTheme.typography.headlineLarge,
                     color = MaterialTheme.colorScheme.primary,
                 )
                 OutlinedButton(onClick = { showGlobalEntityDialog = true }) {
-                    Text("\uD83C\uDF10 Global Entities") // 🌐
+                    Text("Global Entities")
                 }
             }
 
@@ -92,11 +94,6 @@ fun ProjectLauncherScreen(
             } else if (projects.isEmpty()) {
                 Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            "\uD83D\uDCDC", // 📜
-                            style = MaterialTheme.typography.displayLarge,
-                        )
-                        Spacer(Modifier.height(16.dp))
                         Text(
                             "No campaigns yet",
                             style = MaterialTheme.typography.titleLarge,
@@ -217,7 +214,10 @@ private fun ProjectCard(
                 )
             }
             IconButton(onClick = onDelete) {
-                Text("🗑", style = MaterialTheme.typography.titleMedium)
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "Delete"
+                )
             }
         }
     }

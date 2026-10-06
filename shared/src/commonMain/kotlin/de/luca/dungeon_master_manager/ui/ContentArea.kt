@@ -14,7 +14,6 @@ import de.luca.dungeon_master_manager.data.EditorTab
 
 /**
  * Dispatches content rendering based on the active tab's file extension.
- * Phase 3+ will add specialized editors; for now, shows raw text or placeholders.
  */
 @Composable
 fun ContentArea(
@@ -35,11 +34,6 @@ fun ContentArea(
                     contentAlignment = Alignment.Center,
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            "⚔",
-                            style = MaterialTheme.typography.displayLarge,
-                        )
-                        Spacer(Modifier.height(16.dp))
                         Text(
                             "Open a file from the sidebar",
                             style = MaterialTheme.typography.titleMedium,
