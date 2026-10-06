@@ -1,6 +1,10 @@
 package de.luca.dungeon_master_manager.ui
 
+import androidx.compose.animation.core.AnimationSpec
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -20,6 +24,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.isPrimaryPressed
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.loadImageBitmap
 import androidx.compose.ui.unit.dp
 import de.luca.dungeon_master_manager.data.MapData
@@ -53,6 +58,18 @@ fun MapViewer(
     )
     var offsetX by remember { mutableStateOf(0f) }
     var offsetY by remember { mutableStateOf(0f) }
+    val animatedOffsetX = animateFloatAsState(targetValue = offsetX,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+    )
+    val animatedOffsetY = animateFloatAsState(targetValue = offsetY,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+    )
 
     val viewModel = remember(projectPath) { de.luca.dungeon_master_manager.viewmodel.EntityViewModel(
         projectPath,
@@ -106,7 +123,9 @@ fun MapViewer(
 
     var addPinMode by remember { mutableStateOf(false) }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    var viewportSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+
+    Box(modifier = Modifier.fillMaxSize().onSizeChanged { viewportSize = it }) {
         if (imageBitmap != null) {
             var showMarkerDialog by remember { mutableStateOf<MapMarker?>(null) }
             
@@ -114,11 +133,19 @@ fun MapViewer(
                 modifier = Modifier
                     .fillMaxSize()
                     .pointerInput(Unit) {
-                        detectTransformGestures { _, pan, zoom, _ ->
-                            if (!addPinMode) {
-                                scale = (scale * zoom).coerceIn(0.1f, 5f)
-                                offsetX += pan.x
-                                offsetY += pan.y
+                        detectTransformGestures { centroid, pan, zoom, _ ->
+                            if (!addPinMode && viewportSize.width > 0) {
+                                val oldScale = scale
+                                val newScale = (scale * zoom).coerceIn(0.1f, 5f)
+                                val actualZoom = newScale / oldScale
+
+                                val cx = viewportSize.width / 2f
+                                val cy = viewportSize.height / 2f
+
+                                scale = newScale
+                                // Pan the map plus compensate for the zoom shifting
+                                offsetX = offsetX + pan.x + (centroid.x - cx - offsetX) * (1 - actualZoom)
+                                offsetY = offsetY + pan.y + (centroid.y - cy - offsetY) * (1 - actualZoom)
                             }
                         }
                     }
@@ -127,9 +154,23 @@ fun MapViewer(
                             while (true) {
                                 val event = awaitPointerEvent()
                                 if (event.type == androidx.compose.ui.input.pointer.PointerEventType.Scroll) {
-                                    if (!addPinMode) {
+                                    if (!addPinMode && viewportSize.width > 0) {
+                                        // Extract the cursor location to use as the focal point
+                                        val cursorPosition = event.changes.first().position
                                         val delta = event.changes.first().scrollDelta.y
-                                        scale = (scale * if (delta > 0) 0.9f else 1.1f).coerceIn(0.1f, 5f)
+
+                                        val oldScale = scale
+                                        val newScale = (scale * if (delta > 0) 0.9f else 1.1f).coerceIn(0.1f, 5f)
+                                        val actualZoom = newScale / oldScale
+
+                                        val cx = viewportSize.width / 2f
+                                        val cy = viewportSize.height / 2f
+
+                                        scale = newScale
+                                        // Shift the map to compensate for the zoom shifting
+                                        offsetX = offsetX + (cursorPosition.x - cx - offsetX) * (1 - actualZoom)
+                                        offsetY = offsetY + (cursorPosition.y - cy - offsetY) * (1 - actualZoom)
+
                                         event.changes.forEach { it.consume() }
                                     }
                                 }
@@ -147,8 +188,8 @@ fun MapViewer(
                         .graphicsLayer(
                             scaleX = animatedScale.value,
                             scaleY = animatedScale.value,
-                            translationX = offsetX,
-                            translationY = offsetY
+                            translationX = animatedOffsetX.value,
+                            translationY = animatedOffsetY.value
                         )
                         .requiredSize(imageWidthDp, imageHeightDp)
                 ) {
@@ -331,8 +372,22 @@ fun MapViewer(
             shape = MaterialTheme.shapes.medium
         ) {
             Row(modifier = Modifier.padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { scale *= 1.2f }) { Text("+") }
-                Button(onClick = { scale /= 1.2f }) { Text("-") }
+                Button(onClick = {
+                    val oldScale = scale
+                    val newScale = (scale * 1.2f).coerceIn(0.1f, 5f)
+                    val actualZoom = newScale / oldScale
+                    scale = newScale
+                    offsetX *= actualZoom
+                    offsetY *= actualZoom
+                }) { Text("+") }
+                Button(onClick = {
+                    val oldScale = scale
+                    val newScale = (scale / 1.2f).coerceIn(0.1f, 5f)
+                    val actualZoom = newScale / oldScale
+                    scale = newScale
+                    offsetX *= actualZoom
+                    offsetY *= actualZoom
+                }) { Text("-") }
                 Button(onClick = { addPinMode = !addPinMode }, colors = ButtonDefaults.buttonColors(containerColor = if (addPinMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary)) {
                     Text(if (addPinMode) "Click Map to Place" else "Add Pin")
                 }
