@@ -182,6 +182,8 @@ fun MapViewer(
                     mapData.markers.forEach { marker ->
                         val pxX = marker.x * imageBitmap!!.width
                         val pxY = marker.y * imageBitmap!!.height
+
+                        var rightClickMenuOpened by remember { mutableStateOf(false) }
                         
                         var markerColor = Color.Red
                         if (marker.isEntityLinked && marker.entityName != null) {
@@ -206,7 +208,7 @@ fun MapViewer(
                                             val event = awaitPointerEvent()
                                             if (event.type == androidx.compose.ui.input.pointer.PointerEventType.Press) {
                                                 if (event.buttons.isSecondaryPressed) {
-                                                    showMarkerDialog = marker
+                                                    rightClickMenuOpened = true
                                                     event.changes.forEach { it.consume() }
                                                 } else if (event.buttons.isPrimaryPressed) {
                                                     if (marker.isEntityLinked && marker.entityName != null) {
@@ -258,6 +260,36 @@ fun MapViewer(
                                     }
                                 }
                             }
+
+                            DropdownMenu(
+                                expanded = rightClickMenuOpened,
+                                onDismissRequest = { rightClickMenuOpened = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Edit") },
+                                    onClick = {
+                                        rightClickMenuOpened = false
+                                        showMarkerDialog = marker
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Delete") },
+                                    onClick = {
+                                        rightClickMenuOpened = false
+                                        mapData = mapData.copy(markers = mapData.markers.filter { it.id != marker.id })
+                                        saveMap()
+                                    }
+                                )
+                                if(marker.isEntityLinked && marker.entityName != null) {
+                                    DropdownMenuItem(
+                                        text = { Text("Open entity") },
+                                        onClick = {
+                                            rightClickMenuOpened = false
+                                            onOpenEntityPopout(marker.entityName)
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -288,6 +320,8 @@ fun MapViewer(
                     }
                 )
             }
+
+
         }
 
         // Toolbar
