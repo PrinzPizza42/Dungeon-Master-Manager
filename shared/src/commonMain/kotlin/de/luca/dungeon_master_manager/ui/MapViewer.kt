@@ -354,8 +354,6 @@ fun ThumbnailImage(file: File, modifier: Modifier = Modifier) {
     LaunchedEffect(file.absolutePath) {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                // In a production app, we would use Java2D to downscale the image before creating the ImageBitmap
-                // to save memory. For this MVP, we load the image and let Compose scale it down visually.
                 file.inputStream().use {
                     bitmap = androidx.compose.ui.res.loadImageBitmap(it)
                 }
