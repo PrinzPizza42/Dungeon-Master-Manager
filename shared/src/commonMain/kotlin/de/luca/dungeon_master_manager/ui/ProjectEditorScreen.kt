@@ -6,6 +6,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import de.luca.dungeon_master_manager.viewmodel.ProjectEditorViewModel
@@ -14,6 +17,7 @@ import de.luca.dungeon_master_manager.viewmodel.ProjectEditorViewModel
  * Main project editor screen with sidebar file tree, tab bar, and content area.
  */
 import de.luca.dungeon_master_manager.data.EntityPopoutRequest
+import java.awt.Cursor
 
 @Composable
 fun ProjectEditorScreen(
@@ -155,6 +159,7 @@ private fun EditorToolbar(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun EditorSidebar(
     fileTree: de.luca.dungeon_master_manager.data.FileNode?,
@@ -259,28 +264,33 @@ private fun EditorSidebar(
                     Text("Select Folder:", style = MaterialTheme.typography.labelMedium)
                     Spacer(Modifier.height(8.dp))
                     val scrollState = rememberScrollState()
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 150.dp)
-                            .verticalScroll(scrollState)
-                    ) {
-                        folders.forEach { folder ->
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { selectedFolder = folder }
-                                    .padding(vertical = 4.dp)
-                            ) {
-                                RadioButton(
-                                    selected = (selectedFolder == folder),
-                                    onClick = { selectedFolder = folder }
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text(folder)
-                            }
-                        }
+                    var expandedDropdown by remember { mutableStateOf(false) }
+                    ExposedDropdownMenuBox(
+                        expanded = expandedDropdown,
+                        onExpandedChange = { expandedDropdown = !expandedDropdown }
+                    ){
+                        OutlinedTextField(
+                            value = selectedFolder,
+                            onValueChange = {},
+                            readOnly = true,
+                            modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
+                        )
+                        DropdownMenu(
+                            expanded = expandedDropdown,
+                            onDismissRequest = { expandedDropdown = false },
+                            content = {
+                                folders.forEach { folder ->
+                                    DropdownMenuItem(
+                                        text = {Text(folder)},
+                                        onClick = {
+                                            selectedFolder = folder
+                                            expandedDropdown = false
+                                        }
+                                    )
+                                }
+                            },
+                            scrollState = scrollState
+                        )
                     }
                 }
             },
