@@ -1,5 +1,5 @@
-CREATE TABLE Entity (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS Entity (
+    id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     type TEXT NOT NULL,
     color TEXT,
@@ -16,8 +16,8 @@ selectByType:
 SELECT * FROM Entity WHERE type = ?;
 
 insertEntity:
-INSERT INTO Entity(name, type, color, notesFilePath)
-VALUES (?, ?, ?, ?);
+INSERT INTO Entity(id, name, type, color, notesFilePath)
+VALUES (?, ?, ?, ?, ?);
 
 updateEntity:
 UPDATE Entity

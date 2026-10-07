@@ -30,7 +30,7 @@ fun EntityPopoutScreen(
     val projectEnts by viewModel.projectEntities.collectAsState()
     val globalEnts by viewModel.globalEntities.collectAsState()
 
-    var targetEntityId by remember { mutableStateOf<Long?>(null) }
+    var targetEntityId by remember { mutableStateOf<String?>(null) }
     var isGlobalEntity by remember { mutableStateOf(false) }
     var initialized by remember { mutableStateOf(false) }
 
@@ -131,11 +131,11 @@ fun EntityPopoutScreen(
                     // Editor
                     val projectEnts by viewModel.projectEntities.collectAsState()
                     val globalEnts by viewModel.globalEntities.collectAsState()
-                    val entityColors = remember(projectEnts, globalEnts) {
-                        val map = mutableMapOf<String, String>()
-                        globalEnts.forEach { if (it.color != null) map[it.name] = it.color }
-                        projectEnts.forEach { if (it.color != null) map[it.name] = it.color }
-                        map
+                    val entitiesList = remember(projectEnts, globalEnts) {
+                        val list = mutableListOf<de.luca.dungeonmastermanager.database.Entity>()
+                        list.addAll(globalEnts)
+                        list.addAll(projectEnts)
+                        list
                     }
                     
                     Box(modifier = Modifier.weight(1f).padding(16.dp)) {
@@ -154,7 +154,7 @@ fun EntityPopoutScreen(
                             onOpenEntityPopout = { nestedEntityName ->
                                 onOpenEntityPopout(EntityPopoutRequest(nestedEntityName, request.projectPath))
                             },
-                            entityColors = entityColors
+                            entities = entitiesList
                         )
                     }
                 } else {

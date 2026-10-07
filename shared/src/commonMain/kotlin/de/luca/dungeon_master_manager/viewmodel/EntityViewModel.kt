@@ -43,13 +43,19 @@ class EntityViewModel(private val projectPath: String?, private val viewModel: P
     fun addEntity(isGlobal: Boolean, name: String, type: String, color: String?, notesFilePath: String?) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                val db = if (isGlobal) DatabaseHelper.globalDatabase else DatabaseHelper.getProjectDatabase(projectPath!!)
-                db.entityQueries.insertEntity(name, type, color, notesFilePath)
+                try {
+                    val db = if (isGlobal) DatabaseHelper.globalDatabase else DatabaseHelper.getProjectDatabase(projectPath!!)
+                    db.entityQueries.insertEntity(java.util.UUID.randomUUID().toString(), name, type, color, notesFilePath)
+                    println("Entity inserted successfully: $name")
+                } catch (e: Exception) {
+                    System.err.println("Failed to insert entity: ${e.message}")
+                    e.printStackTrace()
+                }
             }
         }
     }
 
-    fun updateEntity(isGlobal: Boolean, id: Long, name: String, type: String, color: String?, notesFilePath: String?) {
+    fun updateEntity(isGlobal: Boolean, id: String, name: String, type: String, color: String?, notesFilePath: String?) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 val db = if (isGlobal) DatabaseHelper.globalDatabase else DatabaseHelper.getProjectDatabase(projectPath!!)
@@ -58,7 +64,7 @@ class EntityViewModel(private val projectPath: String?, private val viewModel: P
         }
     }
 
-    fun deleteEntity(isGlobal: Boolean, id: Long) {
+    fun deleteEntity(isGlobal: Boolean, id: String) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 val db = if (isGlobal) DatabaseHelper.globalDatabase else DatabaseHelper.getProjectDatabase(projectPath!!)
@@ -71,7 +77,7 @@ class EntityViewModel(private val projectPath: String?, private val viewModel: P
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 val destDb = if (toGlobal) DatabaseHelper.globalDatabase else DatabaseHelper.getProjectDatabase(projectPath!!)
-                destDb.entityQueries.insertEntity(entity.name, entity.type, entity.color, entity.notesFilePath)
+                destDb.entityQueries.insertEntity(java.util.UUID.randomUUID().toString(), entity.name, entity.type, entity.color, entity.notesFilePath)
             }
         }
     }

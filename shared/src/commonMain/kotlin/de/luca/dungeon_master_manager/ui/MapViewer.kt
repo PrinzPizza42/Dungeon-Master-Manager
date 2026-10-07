@@ -228,8 +228,8 @@ fun MapViewer(
                         var rightClickMenuOpened by remember { mutableStateOf(false) }
                         
                         var markerColor = Color.Red
-                        if (marker.isEntityLinked && marker.entityName != null) {
-                            val ent = projectEnts.find { it.name == marker.entityName } ?: globalEnts.find { it.name == marker.entityName }
+                        if (marker.isEntityLinked && marker.entityId != null) {
+                            val ent = projectEnts.find { it.id == marker.entityId } ?: globalEnts.find { it.id == marker.entityId }
                             if (ent?.color != null) {
                                 try { markerColor = Color(ent.color.toULong()) } catch(e: Exception) {}
                             }
@@ -253,8 +253,11 @@ fun MapViewer(
                                                     rightClickMenuOpened = true
                                                     event.changes.forEach { it.consume() }
                                                 } else if (event.buttons.isPrimaryPressed) {
-                                                    if (marker.isEntityLinked && marker.entityName != null) {
-                                                        onOpenEntityPopout(marker.entityName)
+                                                    if (marker.isEntityLinked && marker.entityId != null) {
+                                                        val ent = projectEnts.find { it.id == marker.entityId } ?: globalEnts.find { it.id == marker.entityId }
+                                                        if (ent != null) {
+                                                            onOpenEntityPopout(ent.name)
+                                                        }
                                                     } else {
                                                         showMarkerDialog = marker
                                                     }
@@ -288,7 +291,10 @@ fun MapViewer(
                             }
                             
                             if (isHovered) {
-                                val labelText = if (marker.isEntityLinked) marker.entityName else marker.title
+                                val ent = if (marker.isEntityLinked && marker.entityId != null) {
+                                    projectEnts.find { it.id == marker.entityId } ?: globalEnts.find { it.id == marker.entityId }
+                                } else null
+                                val labelText = if (marker.isEntityLinked) ent?.name else marker.title
                                 if (!labelText.isNullOrBlank()) {
                                     Surface(
                                         modifier = Modifier
@@ -322,14 +328,17 @@ fun MapViewer(
                                         saveMap()
                                     }
                                 )
-                                if(marker.isEntityLinked && marker.entityName != null) {
-                                    DropdownMenuItem(
-                                        text = { Text("Open entity") },
-                                        onClick = {
-                                            rightClickMenuOpened = false
-                                            onOpenEntityPopout(marker.entityName)
-                                        }
-                                    )
+                                if(marker.isEntityLinked && marker.entityId != null) {
+                                    val ent = projectEnts.find { it.id == marker.entityId } ?: globalEnts.find { it.id == marker.entityId }
+                                    if (ent != null) {
+                                        DropdownMenuItem(
+                                            text = { Text("Open entity") },
+                                            onClick = {
+                                                rightClickMenuOpened = false
+                                                onOpenEntityPopout(ent.name)
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -478,7 +487,14 @@ fun MapMarkerDialog(
     onDelete: (MapMarker) -> Unit
 ) {
     var isEntityLinked by remember { mutableStateOf(initialMarker.isEntityLinked) }
-    var entityName by remember { mutableStateOf(initialMarker.entityName ?: "") }
+    
+    // Find initial entity to display its name
+    val initEnt = if (initialMarker.entityId != null) {
+        projectEntities.find { it.id == initialMarker.entityId } ?: globalEntities.find { it.id == initialMarker.entityId }
+    } else null
+    
+    var entitySearch by remember { mutableStateOf(initEnt?.name ?: "") }
+    var selectedEntityId by remember { mutableStateOf(initialMarker.entityId) }
     var title by remember { mutableStateOf(initialMarker.title ?: "") }
     var notes by remember { mutableStateOf(initialMarker.notes ?: "") }
     var iconFileName by remember { mutableStateOf(initialMarker.iconFileName) }
@@ -487,11 +503,9 @@ fun MapMarkerDialog(
         )
     }
     
-    // TODO: Icon Selection
-    
     AlertDialog(
         onDismissRequest = onDismissRequest@{ onDismiss() },
-        title = { Text(if (initialMarker.title.isNullOrBlank() && initialMarker.entityName.isNullOrBlank()) "New Map Marker" else "Edit Marker") },
+        title = { Text(if (initialMarker.title.isNullOrBlank() && initialMarker.entityId.isNullOrBlank()) "New Map Marker" else "Edit Marker") },
         text = {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -502,17 +516,20 @@ fun MapMarkerDialog(
                 if (isEntityLinked) {
                     var expanded by remember { mutableStateOf(false) }
                     val allEntities = remember(projectEntities, globalEntities) { projectEntities + globalEntities }
-                    val filteredEntities = remember(entityName, allEntities) {
-                        if (entityName.isBlank()) allEntities 
-                        else allEntities.filter { it.name.contains(entityName, ignoreCase = true) }
+                    val filteredEntities = remember(entitySearch, allEntities) {
+                        if (entitySearch.isBlank()) allEntities 
+                        else allEntities.filter { it.name.contains(entitySearch, ignoreCase = true) }
                     }
                     
                     Box {
                         OutlinedTextField(
-                            value = entityName,
+                            value = entitySearch,
                             onValueChange = { 
-                                entityName = it 
+                                entitySearch = it 
                                 expanded = true
+                                // If they type and it doesn't match exactly, we clear the ID so they have to select one
+                                val perfectMatch = allEntities.find { e -> e.name.equals(it, ignoreCase = true) }
+                                selectedEntityId = perfectMatch?.id
                             },
                             label = { Text("Search Entity") },
                             singleLine = true,
@@ -527,7 +544,8 @@ fun MapMarkerDialog(
                                 DropdownMenuItem(
                                     text = { Text("${ent.name} (${ent.type})") },
                                     onClick = {
-                                        entityName = ent.name
+                                        entitySearch = ent.name
+                                        selectedEntityId = ent.id
                                         expanded = false
                                     }
                                 )
@@ -606,7 +624,7 @@ fun MapMarkerDialog(
             Button(onClick = {
                 onSave(initialMarker.copy(
                     isEntityLinked = isEntityLinked,
-                    entityName = if (isEntityLinked) entityName else null,
+                    entityId = if (isEntityLinked) selectedEntityId else null,
                     title = if (!isEntityLinked) title else null,
                     notes = if (!isEntityLinked) notes else null,
                     iconFileName = iconFileName,

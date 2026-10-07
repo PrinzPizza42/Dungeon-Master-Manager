@@ -11,19 +11,22 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-
 import androidx.compose.foundation.ContextMenuDataProvider
 import androidx.compose.foundation.ContextMenuItem
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.clickable
+import de.luca.dungeonmastermanager.database.Entity
 
 @Composable
 fun MarkdownEditor(
@@ -31,7 +34,7 @@ fun MarkdownEditor(
     onContentChange: (String) -> Unit,
     modifier: Modifier = Modifier,
     onOpenEntityPopout: (String) -> Unit = {},
-    entityColors: Map<String, String> = emptyMap()
+    entities: List<Entity> = emptyList()
 ) {
     var isPreviewMode by remember { mutableStateOf(false) }
 
@@ -61,7 +64,7 @@ fun MarkdownEditor(
         val selected = text.substring(selection.min, selection.max)
         val after = text.substring(selection.max)
 
-        // Case 1: The user highlighted the entire formatted block, e.g., "**bold**"
+        // Case 1: The user highlighted the entire formatted block
         if (selected.startsWith(formatSyntax) && selected.endsWith(formatSyntax) && selected.length >= formatSyntax.length * 2) {
             val unformatted = selected.substring(formatSyntax.length, selected.length - formatSyntax.length)
             val newContent = "$before$unformatted$after"
@@ -71,7 +74,7 @@ fun MarkdownEditor(
             return
         }
 
-        // Case 2: The user highlighted the text inside the formatting, e.g., "bold" surrounded by "**"
+        // Case 2: The user highlighted the text inside the formatting
         if (before.endsWith(formatSyntax) && after.startsWith(formatSyntax)) {
             val newBefore = before.substring(0, before.length - formatSyntax.length)
             val newAfter = after.substring(formatSyntax.length)
@@ -126,7 +129,6 @@ fun MarkdownEditor(
 
             Spacer(modifier = Modifier.weight(1f))
 
-            // Edit / Preview toggle
             TabRow(
                 selectedTabIndex = if (isPreviewMode) 1 else 0,
                 modifier = Modifier.width(200.dp),
@@ -149,17 +151,16 @@ fun MarkdownEditor(
 
         Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
             if (isPreviewMode) {
-                MarkdownPreview(content, entityColors, onOpenEntityPopout)
+                MarkdownPreview(content, entities, onOpenEntityPopout)
             } else {
                 MarkdownEdit(
                     textFieldValue = textFieldValue,
-                    entityColors = entityColors,
+                    entities = entities,
                     onOpenEntityPopout = onOpenEntityPopout,
                     onValueChange = { newValue ->
                         var updatedSelection = newValue.selection
                         val text = newValue.text
 
-                        // Auto-expand selection to include styling tokens if the inner text is selected
                         if (!updatedSelection.collapsed) {
                             val before = text.substring(0, updatedSelection.min)
                             val after = text.substring(updatedSelection.max)
@@ -192,78 +193,137 @@ fun MarkdownEditor(
 @Composable
 private fun MarkdownEdit(
     textFieldValue: TextFieldValue,
-    entityColors: Map<String, String>,
+    entities: List<Entity>,
     onValueChange: (TextFieldValue) -> Unit,
     onFormat: (String) -> Unit,
     onOpenEntityPopout: (String) -> Unit
 ) {
     val primaryColor = MaterialTheme.colorScheme.primary
 
-    val markdownTransformation = remember(primaryColor, textFieldValue.selection, entityColors) {
+    val markdownTransformation = remember(primaryColor, textFieldValue.selection, entities) {
         object : VisualTransformation {
             override fun filter(text: AnnotatedString): TransformedText {
-                val (annotated, mapping) = parseMarkdown(text.text, primaryColor, textFieldValue.selection, entityColors)
+                val (annotated, mapping) = parseMarkdown(text.text, primaryColor, textFieldValue.selection, entities)
                 return TransformedText(annotated, mapping)
             }
         }
     }
 
-    ContextMenuDataProvider(
-        items = {
-            val items = mutableListOf(
-                ContextMenuItem("Bold") { onFormat("**") },
-                ContextMenuItem("Italic") { onFormat("*") },
-                ContextMenuItem("Underline") { onFormat("__") }
+    var dropdownQuery by remember { mutableStateOf<String?>(null) }
+    var dropdownStartOffset by remember { mutableStateOf(-1) }
+    
+    LaunchedEffect(textFieldValue.text, textFieldValue.selection) {
+        val cursor = textFieldValue.selection.start
+        if (cursor > 0 && textFieldValue.selection.collapsed) {
+            val textBeforeCursor = textFieldValue.text.substring(0, cursor)
+            val match = Regex(".*@([\\w\\s]*)$").find(textBeforeCursor)
+            if (match != null) {
+                dropdownQuery = match.groups[1]?.value ?: ""
+                dropdownStartOffset = match.range.last - (match.groups[1]?.value?.length ?: 0)
+            } else {
+                dropdownQuery = null
+            }
+        } else {
+            dropdownQuery = null
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        ContextMenuDataProvider(
+            items = {
+                val items = mutableListOf(
+                    ContextMenuItem("Bold") { onFormat("**") },
+                    ContextMenuItem("Italic") { onFormat("*") },
+                    ContextMenuItem("Underline") { onFormat("__") }
+                )
+                
+                val text = textFieldValue.text
+                val uniqueEntities = Regex("(?<!\\\\)@\\[(.*?)\\]").findAll(text).map { it.groups[1]!!.value }.toSet()
+                
+                if (uniqueEntities.isNotEmpty()) {
+                    uniqueEntities.forEach { entityId ->
+                        val ent = entities.find { it.id == entityId }
+                        if (ent != null) {
+                            items.add(0, ContextMenuItem("Open Entity '${ent.name}'") {
+                                onOpenEntityPopout(ent.name)
+                            })
+                        }
+                    }
+                }
+                
+                items
+            }
+        ) {
+            BasicTextField(
+                value = textFieldValue,
+                onValueChange = onValueChange,
+                modifier = Modifier.fillMaxSize(),
+                textStyle = TextStyle(
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 16.sp
+                ),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+                visualTransformation = markdownTransformation
             )
+        }
+
+        if (dropdownQuery != null) {
+            val query = dropdownQuery!!
+            val filtered = if (query.isBlank()) entities else entities.filter { it.name.contains(query, ignoreCase = true) }
             
-            val text = textFieldValue.text
-            val uniqueEntities = Regex("(?<!\\\\)@\\[(.*?)\\]").findAll(text).map { it.groups[1]!!.value }.toSet()
-            
-            if (uniqueEntities.isNotEmpty()) {
-                uniqueEntities.forEach { entityName ->
-                    items.add(0, ContextMenuItem("Open Entity '$entityName'") {
-                        onOpenEntityPopout(entityName)
-                    })
+            if (filtered.isNotEmpty()) {
+                Surface(
+                    modifier = Modifier.padding(top = 24.dp).width(250.dp).heightIn(max = 200.dp),
+                    shadowElevation = 8.dp,
+                    shape = MaterialTheme.shapes.medium
+                ) {
+                    LazyColumn {
+                        items(filtered.take(10)) { ent ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    val text = textFieldValue.text
+                                    val before = text.substring(0, dropdownStartOffset - 1) // include @
+                                    val after = text.substring(textFieldValue.selection.start)
+                                    val newContent = "$before@[${ent.id}]$after"
+                                    val newSelection = androidx.compose.ui.text.TextRange(before.length + ent.id.length + 3)
+                                    onValueChange(TextFieldValue(newContent, newSelection))
+                                }.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val c = try { Color(ent.color?.toULong() ?: 0xFFFFFFFFuL) } catch(e: Exception) { Color.Gray }
+                                Box(modifier = Modifier.size(12.dp).background(c, MaterialTheme.shapes.small))
+                                Spacer(Modifier.width(8.dp))
+                                Text(ent.name, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                Spacer(Modifier.width(8.dp))
+                                Text("(${ent.type})", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                            }
+                        }
+                    }
                 }
             }
-            
-            items
         }
-    ) {
-        BasicTextField(
-            value = textFieldValue,
-            onValueChange = onValueChange,
-            modifier = Modifier.fillMaxSize(),
-            textStyle = TextStyle(
-                color = MaterialTheme.colorScheme.onSurface,
-                fontSize = 16.sp
-            ),
-            cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
-            visualTransformation = markdownTransformation
-        )
     }
 }
 
 @Composable
-private fun MarkdownPreview(content: String, entityColors: Map<String, String>, onOpenEntityPopout: (String) -> Unit) {
+private fun MarkdownPreview(content: String, entities: List<Entity>, onOpenEntityPopout: (String) -> Unit) {
     val primaryColor = MaterialTheme.colorScheme.primary
-    val (baseAnnotatedString, _) = remember(content, primaryColor, entityColors) {
-        parseMarkdown(content, primaryColor, null, entityColors) // null selection hides all syntax
+    val (baseAnnotatedString, _) = remember(content, primaryColor, entities) {
+        parseMarkdown(content, primaryColor, null, entities) // null selection hides all syntax
     }
     
-    // Convert string annotations to LinkAnnotations for hover/click support
-    val finalAnnotatedString = remember(baseAnnotatedString, entityColors, primaryColor, onOpenEntityPopout) {
+    val finalAnnotatedString = remember(baseAnnotatedString, entities, primaryColor, onOpenEntityPopout) {
         val builder = AnnotatedString.Builder(baseAnnotatedString)
         baseAnnotatedString.getStringAnnotations("entity", 0, baseAnnotatedString.length).forEach { annotation ->
-            val entityName = annotation.item
-            val hexColor = entityColors[entityName]
-            val color = if (hexColor != null) {
-                try { Color(hexColor.toULong()) } catch(e: Exception) { primaryColor }
+            val entityId = annotation.item
+            val ent = entities.find { it.id == entityId }
+            val color = if (ent?.color != null) {
+                try { Color(ent.color.toULong()) } catch(e: Exception) { primaryColor }
             } else primaryColor
 
             builder.addLink(
                 androidx.compose.ui.text.LinkAnnotation.Clickable(
-                    tag = entityName,
+                    tag = entityId,
                     styles = androidx.compose.ui.text.TextLinkStyles(
                         style = SpanStyle(
                             color = color,
@@ -272,7 +332,9 @@ private fun MarkdownPreview(content: String, entityColors: Map<String, String>, 
                         )
                     ),
                     linkInteractionListener = {
-                        onOpenEntityPopout(entityName)
+                        if (ent != null) {
+                            onOpenEntityPopout(ent.name)
+                        }
                     }
                 ),
                 annotation.start,
@@ -295,117 +357,196 @@ private fun parseMarkdown(
     text: String,
     primaryColor: Color,
     cursorSelection: androidx.compose.ui.text.TextRange?,
-    entityColors: Map<String, String> = emptyMap()
+    entities: List<Entity> = emptyList()
 ): Pair<AnnotatedString, OffsetMapping> {
-    val hiddenRanges = mutableListOf<IntRange>()
-    val styles = mutableListOf<Triple<SpanStyle, Int, Int>>()
-    val entityAnnotations = mutableListOf<Triple<String, Int, Int>>()
+    val builder = AnnotatedString.Builder()
+    
+    val origToTrans = mutableListOf<Int>()
+    val transToOrig = mutableListOf<Int>()
+
+    var cursor = 0
 
     fun isCursorInside(range: IntRange): Boolean {
         if (cursorSelection == null) return false
         return cursorSelection.start <= range.last + 1 && cursorSelection.end >= range.first - 1
     }
 
-    // Bold (**text**)
-    Regex("\\*\\*(.*?)\\*\\*").findAll(text).forEach { match ->
-        styles.add(Triple(SpanStyle(fontWeight = FontWeight.Bold), match.range.first, match.range.last + 1))
-        if (!isCursorInside(match.range)) {
-            hiddenRanges.add(match.range.first..match.range.first + 1)
-            hiddenRanges.add(match.range.last - 1..match.range.last)
-        }
-    }
+    // A simple regex approach to find all tokens in order
+    // Tokenize: Bold, Italic, Underline, Entity, Headings
+    val regex = Regex("\\*\\*(.*?)\\*\\*|(?<!\\*)\\*(?!\\*)(.*?)(?<!\\*)\\*(?!\\*)|__(.*?)__|(?<!\\\\)@\\[(.*?)\\]|^(#{1,6}) (.*)$", RegexOption.MULTILINE)
+    
+    val matches = regex.findAll(text)
 
-    // Italic (*text*)
-    Regex("(?<!\\*)\\*(?!\\*)(.*?)(?<!\\*)\\*(?!\\*)").findAll(text).forEach { match ->
-        styles.add(Triple(SpanStyle(fontStyle = FontStyle.Italic), match.range.first, match.range.last + 1))
-        if (!isCursorInside(match.range)) {
-            hiddenRanges.add(match.range.first..match.range.first)
-            hiddenRanges.add(match.range.last..match.range.last)
-        }
-    }
-
-    // Underline (__text__)
-    Regex("__(.*?)__").findAll(text).forEach { match ->
-        styles.add(Triple(SpanStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline), match.range.first, match.range.last + 1))
-        if (!isCursorInside(match.range)) {
-            hiddenRanges.add(match.range.first..match.range.first + 1)
-            hiddenRanges.add(match.range.last - 1..match.range.last)
-        }
-    }
-
-    // Entities (@[EntityName])
-    Regex("(?<!\\\\)@\\[(.*?)\\]").findAll(text).forEach { match ->
-        val entityName = match.groups[1]!!.value
-        val hexColor = entityColors[entityName]
-        val color = if (hexColor != null) {
-            try { Color(hexColor.toULong()) } catch(e: Exception) { primaryColor }
-        } else primaryColor
-        
-        styles.add(Triple(
-            SpanStyle(color = color, fontWeight = FontWeight.Bold, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline),
-            match.range.first, match.range.last + 1
-        ))
-        entityAnnotations.add(Triple(entityName, match.range.first, match.range.last + 1))
-        if (!isCursorInside(match.range)) {
-            hiddenRanges.add(match.range.first..match.range.first + 1)
-            hiddenRanges.add(match.range.last..match.range.last)
-        }
-    }
-
-    // Headings
-    Regex("^(#{1,6}) (.*)$", RegexOption.MULTILINE).findAll(text).forEach { match ->
-        val hashes = match.groups[1]?.value ?: ""
-        val fontSize = when (hashes.length) {
-            1 -> 24.sp
-            2 -> 20.sp
-            else -> 18.sp
-        }
-        styles.add(Triple(SpanStyle(color = primaryColor, fontWeight = FontWeight.Bold, fontSize = fontSize), match.range.first, match.range.last + 1))
-        
-        // Only hide the "# " in Preview mode
-        if (cursorSelection == null) {
-            val hashRange = match.groups[1]!!.range
-            val spaceIndex = hashRange.last + 1
-            hiddenRanges.add(hashRange.first..spaceIndex)
-        }
-    }
-
-    val simplifiedHidden = hiddenRanges.flatMap { it.toList() }.toSet()
-
-    val origLength = text.length
-    val origToTrans = IntArray(origLength + 1)
-    val transToOrig = mutableListOf<Int>()
-    val builder = AnnotatedString.Builder()
-
-    for (i in 0 until origLength) {
-        origToTrans[i] = transToOrig.size
-        if (i !in simplifiedHidden) {
+    for (match in matches) {
+        // Append text before match
+        for (i in cursor until match.range.first) {
+            origToTrans.add(builder.length)
             builder.append(text[i])
             transToOrig.add(i)
         }
+        
+        cursor = match.range.last + 1
+
+        val isCursorIn = isCursorInside(match.range)
+        val origStart = match.range.first
+
+        if (match.value.startsWith("**")) {
+            val content = match.groups[1]!!.value
+            if (!isCursorIn) {
+                // hide **
+                origToTrans.add(builder.length) // *
+                origToTrans.add(builder.length) // *
+                val transStart = builder.length
+                for (i in content.indices) {
+                    origToTrans.add(builder.length)
+                    builder.append(content[i])
+                    transToOrig.add(origStart + 2 + i)
+                }
+                origToTrans.add(builder.length) // *
+                origToTrans.add(builder.length) // *
+                builder.addStyle(SpanStyle(fontWeight = FontWeight.Bold), transStart, builder.length)
+            } else {
+                val transStart = builder.length
+                for (i in match.range) {
+                    origToTrans.add(builder.length)
+                    builder.append(text[i])
+                    transToOrig.add(i)
+                }
+                builder.addStyle(SpanStyle(fontWeight = FontWeight.Bold), transStart, builder.length)
+            }
+        } else if (match.value.startsWith("__")) {
+            val content = match.groups[3]!!.value
+            if (!isCursorIn) {
+                origToTrans.add(builder.length)
+                origToTrans.add(builder.length)
+                val transStart = builder.length
+                for (i in content.indices) {
+                    origToTrans.add(builder.length)
+                    builder.append(content[i])
+                    transToOrig.add(origStart + 2 + i)
+                }
+                origToTrans.add(builder.length)
+                origToTrans.add(builder.length)
+                builder.addStyle(SpanStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline), transStart, builder.length)
+            } else {
+                val transStart = builder.length
+                for (i in match.range) {
+                    origToTrans.add(builder.length)
+                    builder.append(text[i])
+                    transToOrig.add(i)
+                }
+                builder.addStyle(SpanStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline), transStart, builder.length)
+            }
+        } else if (match.value.startsWith("*") && !match.value.startsWith("**")) {
+            val content = match.groups[2]!!.value
+            if (!isCursorIn) {
+                origToTrans.add(builder.length)
+                val transStart = builder.length
+                for (i in content.indices) {
+                    origToTrans.add(builder.length)
+                    builder.append(content[i])
+                    transToOrig.add(origStart + 1 + i)
+                }
+                origToTrans.add(builder.length)
+                builder.addStyle(SpanStyle(fontStyle = FontStyle.Italic), transStart, builder.length)
+            } else {
+                val transStart = builder.length
+                for (i in match.range) {
+                    origToTrans.add(builder.length)
+                    builder.append(text[i])
+                    transToOrig.add(i)
+                }
+                builder.addStyle(SpanStyle(fontStyle = FontStyle.Italic), transStart, builder.length)
+            }
+        } else if (match.value.startsWith("@[") || match.value.startsWith("\\@[")) {
+            val isEscaped = match.value.startsWith("\\")
+            val idGroup = match.groups[4]
+            if (idGroup != null && !isEscaped) {
+                val id = idGroup.value
+                val ent = entities.find { it.id == id }
+                val color = if (ent?.color != null) {
+                    try { Color(ent.color.toULong()) } catch(e: Exception) { primaryColor }
+                } else Color.Red
+                
+                val displayText = ent?.name ?: "Unknown Entity"
+
+                if (!isCursorIn) {
+                    val transStart = builder.length
+                    
+                    // Map entire original token to the start of the display text
+                    for (i in match.range) {
+                        origToTrans.add(builder.length)
+                    }
+                    
+                    for (i in displayText.indices) {
+                        builder.append(displayText[i])
+                        transToOrig.add(match.range.last) // all transformed chars map to the end of the token
+                    }
+
+                    builder.addStyle(SpanStyle(color = color, fontWeight = FontWeight.Bold, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline), transStart, builder.length)
+                    builder.addStringAnnotation("entity", id, transStart, builder.length)
+                } else {
+                    val transStart = builder.length
+                    for (i in match.range) {
+                        origToTrans.add(builder.length)
+                        builder.append(text[i])
+                        transToOrig.add(i)
+                    }
+                    builder.addStyle(SpanStyle(color = color, fontWeight = FontWeight.Bold, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline), transStart, builder.length)
+                    builder.addStringAnnotation("entity", id, transStart, builder.length)
+                }
+            } else {
+                // Just append raw
+                for (i in match.range) {
+                    origToTrans.add(builder.length)
+                    builder.append(text[i])
+                    transToOrig.add(i)
+                }
+            }
+        } else if (match.groups[5] != null) {
+            val hashes = match.groups[5]!!.value
+            val content = match.groups[6]!!.value
+            val fontSize = when (hashes.length) {
+                1 -> 24.sp
+                2 -> 20.sp
+                else -> 18.sp
+            }
+            if (cursorSelection == null) {
+                // Preview mode: hide "# "
+                for (i in 0..hashes.length) {
+                    origToTrans.add(builder.length)
+                }
+                val transStart = builder.length
+                for (i in content.indices) {
+                    origToTrans.add(builder.length)
+                    builder.append(content[i])
+                    transToOrig.add(origStart + hashes.length + 1 + i)
+                }
+                builder.addStyle(SpanStyle(color = primaryColor, fontWeight = FontWeight.Bold, fontSize = fontSize), transStart, builder.length)
+            } else {
+                val transStart = builder.length
+                for (i in match.range) {
+                    origToTrans.add(builder.length)
+                    builder.append(text[i])
+                    transToOrig.add(i)
+                }
+                builder.addStyle(SpanStyle(color = primaryColor, fontWeight = FontWeight.Bold, fontSize = fontSize), transStart, builder.length)
+            }
+        }
     }
-    origToTrans[origLength] = transToOrig.size
-    transToOrig.add(origLength)
+
+    for (i in cursor until text.length) {
+        origToTrans.add(builder.length)
+        builder.append(text[i])
+        transToOrig.add(i)
+    }
+    
+    origToTrans.add(builder.length)
+    transToOrig.add(text.length)
 
     val offsetMapping = object : OffsetMapping {
-        override fun originalToTransformed(offset: Int): Int = origToTrans[offset.coerceIn(0, origLength)]
+        override fun originalToTransformed(offset: Int): Int = origToTrans[offset.coerceIn(0, text.length)]
         override fun transformedToOriginal(offset: Int): Int = transToOrig[offset.coerceIn(0, transToOrig.size - 1)]
-    }
-
-    styles.forEach { (style, origStart, origEnd) ->
-        val transStart = origToTrans[origStart]
-        val transEnd = origToTrans[origEnd]
-        if (transStart < transEnd) {
-            builder.addStyle(style, transStart, transEnd)
-        }
-    }
-
-    entityAnnotations.forEach { (entityName, origStart, origEnd) ->
-        val transStart = origToTrans[origStart]
-        val transEnd = origToTrans[origEnd]
-        if (transStart < transEnd) {
-            builder.addStringAnnotation("entity", entityName, transStart, transEnd)
-        }
     }
 
     return Pair(builder.toAnnotatedString(), offsetMapping)

@@ -10,7 +10,7 @@ data class MapMarker(
     val isEntityLinked: Boolean,
     
     // For Entity-Linked
-    val entityName: String? = null,
+    val entityId: String? = null,
     
     // For Standalone
     val title: String? = null,

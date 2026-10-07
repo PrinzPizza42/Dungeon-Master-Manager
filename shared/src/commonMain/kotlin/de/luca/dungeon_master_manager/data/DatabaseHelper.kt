@@ -18,10 +18,10 @@ object DatabaseHelper {
     }
 
     // A map to cache project databases
-    private val projectDatabases = mutableMapOf<String, AppDatabase>()
+    private val projectDatabases = java.util.concurrent.ConcurrentHashMap<String, AppDatabase>()
 
     fun getProjectDatabase(projectPath: String): AppDatabase {
-        return projectDatabases.getOrPut(projectPath) {
+        return projectDatabases.computeIfAbsent(projectPath) {
             val dbFile = File(projectPath, ".entities.db")
             createDatabase(dbFile)
         }

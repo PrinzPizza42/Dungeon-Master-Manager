@@ -40,11 +40,11 @@ fun ProjectEditorScreen(
 
     val projectEnts by entityViewModel.projectEntities.collectAsState()
     val globalEnts by entityViewModel.globalEntities.collectAsState()
-    val entityColors = remember(projectEnts, globalEnts) {
-        val map = mutableMapOf<String, String>()
-        globalEnts.forEach { if (it.color != null) map[it.name] = it.color }
-        projectEnts.forEach { if (it.color != null) map[it.name] = it.color }
-        map
+    val entities = remember(projectEnts, globalEnts) {
+        val list = mutableListOf<de.luca.dungeonmastermanager.database.Entity>()
+        list.addAll(globalEnts)
+        list.addAll(projectEnts)
+        list
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -113,7 +113,7 @@ fun ProjectEditorScreen(
                         onOpenEntityPopout = { entityName ->
                             onOpenEntityPopout(EntityPopoutRequest(entityName, viewModel.project.path))
                         },
-                        entityColors = entityColors,
+                        entities = entities,
                         projectPath = viewModel.project.path
                     )
                 }
@@ -144,7 +144,7 @@ fun ProjectEditorScreen(
                     StandaloneFileEditorWindow(
                         tab = poppedOut.tab,
                         projectPath = viewModel.project.path,
-                        entityColors = entityColors,
+                        entities = entities,
                         onOpenEntityPopout = { entityName ->
                             onOpenEntityPopout(EntityPopoutRequest(entityName, viewModel.project.path))
                         }
@@ -159,7 +159,7 @@ fun ProjectEditorScreen(
 fun StandaloneFileEditorWindow(
     tab: de.luca.dungeon_master_manager.data.EditorTab,
     projectPath: String,
-    entityColors: Map<String, String>,
+    entities: List<de.luca.dungeonmastermanager.database.Entity>,
     onOpenEntityPopout: (String) -> Unit
 ) {
     var fileContent by remember { mutableStateOf<String?>(null) }
@@ -189,7 +189,7 @@ fun StandaloneFileEditorWindow(
                 contentToSave = it 
             },
             onOpenEntityPopout = onOpenEntityPopout,
-            entityColors = entityColors,
+            entities = entities,
             projectPath = projectPath
         )
     }

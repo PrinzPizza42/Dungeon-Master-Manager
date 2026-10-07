@@ -23,7 +23,7 @@ fun ContentArea(
     onContentChange: (String) -> Unit,
     modifier: Modifier = Modifier,
     onOpenEntityPopout: (String) -> Unit = {},
-    entityColors: Map<String, String> = emptyMap(),
+    entities: List<de.luca.dungeonmastermanager.database.Entity> = emptyList(),
     projectPath: String = ""
 ) {
     Box(modifier = modifier.fillMaxSize()) {
@@ -64,7 +64,7 @@ fun ContentArea(
                             onContentChange = onContentChange,
                             modifier = Modifier.fillMaxSize(),
                             onOpenEntityPopout = onOpenEntityPopout,
-                            entityColors = entityColors
+                            entities = entities
                         )
                     }
                     "map" -> key(activeTab.filePath) {
