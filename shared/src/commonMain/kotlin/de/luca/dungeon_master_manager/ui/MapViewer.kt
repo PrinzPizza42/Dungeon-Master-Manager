@@ -24,6 +24,7 @@ import androidx.compose.ui.input.pointer.isPrimaryPressed
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.res.loadImageBitmap
 import androidx.compose.ui.unit.dp
 import de.luca.dungeon_master_manager.colorElement
@@ -533,11 +534,16 @@ fun MapMarkerDialog(
                             },
                             label = { Text("Search Entity") },
                             singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .onFocusChanged { focusState ->
+                                    if (focusState.isFocused) expanded = true
+                                }
                         )
                         DropdownMenu(
                             expanded = expanded && filteredEntities.isNotEmpty(),
                             onDismissRequest = { expanded = false },
+                            properties = androidx.compose.ui.window.PopupProperties(focusable = false),
                             modifier = Modifier.fillMaxWidth(0.5f)
                         ) {
                             filteredEntities.take(5).forEach { ent ->
