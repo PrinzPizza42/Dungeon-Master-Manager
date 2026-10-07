@@ -15,7 +15,7 @@ data class MapMarker(
     // For Standalone
     val title: String? = null,
     val notes: String? = null,
-    val colorHex: String? = null, // e.g. "4294901760" for Color.value
+    val colorULong: String? = null, // e.g. "4294901760" for Color.value
     
     // Shared
     val iconFileName: String? = null // e.g. "skull.png". If null, render as dot.

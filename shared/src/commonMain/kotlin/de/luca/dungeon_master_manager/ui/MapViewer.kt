@@ -1,16 +1,15 @@
 package de.luca.dungeon_master_manager.ui
 
-import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
@@ -27,8 +26,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.loadImageBitmap
 import androidx.compose.ui.unit.dp
+import de.luca.dungeon_master_manager.colorElement
 import de.luca.dungeon_master_manager.data.MapData
 import de.luca.dungeon_master_manager.data.MapMarker
+import de.luca.dungeon_master_manager.random
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
@@ -232,8 +233,8 @@ fun MapViewer(
                             if (ent?.color != null) {
                                 try { markerColor = Color(ent.color.toULong()) } catch(e: Exception) {}
                             }
-                        } else if (marker.colorHex != null) {
-                            try { markerColor = Color(marker.colorHex.toULong()) } catch(e: Exception) {}
+                        } else if (marker.colorULong != null) {
+                            try { markerColor = Color(marker.colorULong.toULong()) } catch(e: Exception) {}
                         }
                         
                         Box(
@@ -481,6 +482,10 @@ fun MapMarkerDialog(
     var title by remember { mutableStateOf(initialMarker.title ?: "") }
     var notes by remember { mutableStateOf(initialMarker.notes ?: "") }
     var iconFileName by remember { mutableStateOf(initialMarker.iconFileName) }
+    var color by remember { mutableStateOf(
+        initialMarker.colorULong ?: Color.random().value.toString()
+        )
+    }
     
     // TODO: Icon Selection
     
@@ -545,47 +550,53 @@ fun MapMarkerDialog(
                         modifier = Modifier.fillMaxWidth().height(100.dp)
                     )
                 }
-                
-                Spacer(Modifier.height(16.dp))
-                Text("Marker Icon", style = MaterialTheme.typography.labelLarge)
-                Spacer(Modifier.height(8.dp))
-                var availableIcons by remember { mutableStateOf<List<File>>(emptyList()) }
-                
-                LaunchedEffect(Unit) {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        val iconsDir = File(System.getProperty("user.home"), ".dungeon-master-manager/.global/Icons")
-                        iconsDir.mkdirs()
-                        availableIcons = iconsDir.listFiles()?.filter { it.isFile && it.extension.lowercase() in listOf("png", "jpg", "jpeg", "webp") }?.sortedBy { it.name } ?: emptyList()
-                    }
-                }
-                
-                androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    item {
-                        // Default Dot option
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(MaterialTheme.shapes.small)
-                                .background(if (iconFileName == null) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
-                                .clickable { iconFileName = null }
-                                .padding(8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Box(modifier = Modifier.size(24.dp).background(Color.Red, shape = CircleShape))
+
+                if(!isEntityLinked) {
+                    Spacer(Modifier.height(16.dp))
+                    Text("Marker Icon", style = MaterialTheme.typography.labelLarge)
+                    Spacer(Modifier.height(8.dp))
+                    var availableIcons by remember { mutableStateOf<List<File>>(emptyList()) }
+
+                    LaunchedEffect(Unit) {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            val iconsDir = File(System.getProperty("user.home"), ".dungeon-master-manager/.global/Icons")
+                            iconsDir.mkdirs()
+                            availableIcons = iconsDir.listFiles()?.filter { it.isFile && it.extension.lowercase() in listOf("png", "jpg", "jpeg", "webp") }?.sortedBy { it.name } ?: emptyList()
                         }
                     }
-                    
-                    items(availableIcons) { iconFile ->
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(MaterialTheme.shapes.small)
-                                .background(if (iconFileName == iconFile.name) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
-                                .clickable { iconFileName = iconFile.name }
-                                .padding(4.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            ThumbnailImage(file = iconFile, modifier = Modifier.fillMaxSize())
+
+                    val showColorPicker = remember { mutableStateOf(false) }
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        item {
+                            // Use only color
+                            val parsedColor = try {
+                                Color(color.toULong())
+                            } catch (e: Exception) {
+                                Color.White
+                            }
+
+                            colorElement(
+                                currentColor = parsedColor,
+                                showPopup = showColorPicker,
+                                onClick = { inputColor ->
+                                    color = inputColor.value.toString()
+                                }
+                            )
+                        }
+
+                        // Use icon
+                        items(availableIcons) { iconFile ->
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(MaterialTheme.shapes.small)
+                                    .background(if (iconFileName == iconFile.name) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+                                    .clickable { iconFileName = iconFile.name }
+                                    .padding(4.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                ThumbnailImage(file = iconFile, modifier = Modifier.fillMaxSize())
+                            }
                         }
                     }
                 }
@@ -598,7 +609,8 @@ fun MapMarkerDialog(
                     entityName = if (isEntityLinked) entityName else null,
                     title = if (!isEntityLinked) title else null,
                     notes = if (!isEntityLinked) notes else null,
-                    iconFileName = iconFileName
+                    iconFileName = iconFileName,
+                    colorULong = color
                 ))
             }) {
                 Text("Save Marker")

@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import de.luca.dungeon_master_manager.colorElement
 import de.luca.dungeonmastermanager.database.Entity
 import de.luca.dungeon_master_manager.viewmodel.EntityViewModel
 
@@ -199,9 +200,9 @@ fun CreateEntityDialog(
     var color by remember { mutableStateOf(initialEntity?.color ?: Color.Red.value.toString()) }
     var notesPath by remember { mutableStateOf(initialEntity?.notesFilePath ?: "") }
     var showFileSelector by remember { mutableStateOf(false) }
+    val showColorPicker = remember { mutableStateOf(false) }
 
     val types = listOf("NPC", "PC", "Place", "Item", "Monster")
-    val colors = listOf(Color.Red, Color.Blue, Color.Green, Color.Yellow, Color.Magenta, Color.Cyan, Color.Gray)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -228,29 +229,13 @@ fun CreateEntityDialog(
                 }
                 Spacer(Modifier.height(8.dp))
                 Text("Color:", style = MaterialTheme.typography.labelMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 4.dp)) {
-                    colors.forEach { c ->
-                        val isSelected = color == c.value.toString()
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .background(c, shape = MaterialTheme.shapes.small)
-                                .clickable { color = c.value.toString() }
-                                .then(
-                                    if (isSelected) {
-                                        Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, MaterialTheme.shapes.small)
-                                    } else {
-                                        Modifier
-                                    }
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (isSelected) {
-                                Text("✓", color = if (c == Color.White || c == Color.Yellow || c == Color.Cyan) Color.Black else Color.White, fontWeight = FontWeight.Bold)
-                            }
-                        }
+                colorElement(
+                    Color(color.toULong()),
+                    showColorPicker,
+                    onClick = { inputColor ->
+                        color = inputColor.value.toString()
                     }
-                }
+                )
                 Spacer(Modifier.height(16.dp))
                 
                 Text("Notes File:", style = MaterialTheme.typography.labelMedium)
