@@ -79,12 +79,35 @@ fun MapViewer(
     ) }
     val projectEnts by viewModel.projectEntities.collectAsState()
     val globalEnts by viewModel.globalEntities.collectAsState()
+    val isLoaded by viewModel.isLoaded.collectAsState()
     
     // Auto-save function
     fun saveMap() {
         try {
             onContentChange(json.encodeToString(mapData))
         } catch(e: Exception) { e.printStackTrace() }
+    }
+
+    LaunchedEffect(isLoaded, projectEnts, globalEnts) {
+        if (isLoaded) {
+            val validMarkers = mapData.markers.filterNot { marker ->
+                marker.isEntityLinked && (marker.entityId == null || (projectEnts.none { it.id == marker.entityId } && globalEnts.none { it.id == marker.entityId }))
+            }
+            if (validMarkers.size != mapData.markers.size) {
+                mapData = mapData.copy(markers = validMarkers)
+                saveMap()
+            }
+        }
+    }
+
+    val visibleMarkers = remember(mapData.markers, projectEnts, globalEnts, isLoaded) {
+        if (!isLoaded) {
+            mapData.markers
+        } else {
+            mapData.markers.filterNot { marker ->
+                marker.isEntityLinked && (marker.entityId == null || (projectEnts.none { it.id == marker.entityId } && globalEnts.none { it.id == marker.entityId }))
+            }
+        }
     }
 
     if (mapData.imagePath.isBlank()) {
@@ -222,7 +245,7 @@ fun MapViewer(
                     )
                     
                     // Render markers
-                    mapData.markers.forEach { marker ->
+                    visibleMarkers.forEach { marker ->
                         val pxX = marker.x * imageBitmap!!.width
                         val pxY = marker.y * imageBitmap!!.height
 
@@ -627,16 +650,19 @@ fun MapMarkerDialog(
             }
         },
         confirmButton = {
-            Button(onClick = {
-                onSave(initialMarker.copy(
-                    isEntityLinked = isEntityLinked,
-                    entityId = if (isEntityLinked) selectedEntityId else null,
-                    title = if (!isEntityLinked) title else null,
-                    notes = if (!isEntityLinked) notes else null,
-                    iconFileName = iconFileName,
-                    colorULong = color
-                ))
-            }) {
+            Button(
+                onClick = {
+                    onSave(initialMarker.copy(
+                        isEntityLinked = isEntityLinked,
+                        entityId = if (isEntityLinked) selectedEntityId else null,
+                        title = if (!isEntityLinked) title else null,
+                        notes = if (!isEntityLinked) notes else null,
+                        iconFileName = iconFileName,
+                        colorULong = color
+                    ))
+                },
+                enabled = if (isEntityLinked) selectedEntityId != null else true
+            ) {
                 Text("Save Marker")
             }
         },

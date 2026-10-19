@@ -5,10 +5,13 @@ import androidx.lifecycle.viewModelScope
 import de.luca.dungeon_master_manager.data.EditorTab
 import de.luca.dungeon_master_manager.data.FileNode
 import de.luca.dungeon_master_manager.data.FileService
+import de.luca.dungeon_master_manager.data.MapData
 import de.luca.dungeon_master_manager.data.ProjectInfo
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 class ProjectEditorViewModel(
     val project: ProjectInfo,
@@ -220,6 +223,35 @@ class ProjectEditorViewModel(
                 }
             } catch (e: Exception) {
                 // Ignore for now
+            }
+        }
+    }
+
+    fun onEntityDeleted(entityId: String) {
+        loadEntityColors()
+        val activePath = _activeTabPath.value
+        if (activePath != null && activePath.endsWith(".map")) {
+            val currentContent = _activeFileContent.value
+            if (!currentContent.isNullOrBlank()) {
+                try {
+                    val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
+                    val mapData = json.decodeFromString<MapData>(currentContent)
+                    val remainingMarkers = mapData.markers.filterNot { it.entityId == entityId }
+                    if (remainingMarkers.size != mapData.markers.size) {
+                        saveJob?.cancel()
+                        val updatedJson = json.encodeToString(mapData.copy(markers = remainingMarkers))
+                        _activeFileContent.value = updatedJson
+                        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                            try {
+                                fileService.writeFile(activePath, updatedJson)
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }
         }
     }

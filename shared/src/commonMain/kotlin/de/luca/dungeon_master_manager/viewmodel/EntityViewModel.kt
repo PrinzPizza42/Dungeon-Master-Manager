@@ -14,6 +14,12 @@ import kotlinx.coroutines.withContext
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
 
+import de.luca.dungeon_master_manager.data.MapData
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import java.io.File
+import java.util.UUID
+
 class EntityViewModel(private val projectPath: String?, private val viewModel: ProjectEditorViewModel?) : ViewModel() {
 
     private val _projectEntities = MutableStateFlow<List<Entity>>(emptyList())
@@ -22,19 +28,31 @@ class EntityViewModel(private val projectPath: String?, private val viewModel: P
     private val _globalEntities = MutableStateFlow<List<Entity>>(emptyList())
     val globalEntities: StateFlow<List<Entity>> = _globalEntities
 
+    private val _isLoaded = MutableStateFlow(false)
+    val isLoaded: StateFlow<Boolean> = _isLoaded
+
     init {
         val globalDb = DatabaseHelper.globalDatabase
         viewModelScope.launch {
-            globalDb.entityQueries.selectAll().asFlow().mapToList(Dispatchers.IO).collect {
-                _globalEntities.value = it
-            }
-        }
+            var globalLoaded = false
+            var projectLoaded = projectPath == null
 
-        if (projectPath != null) {
-            val projectDb = DatabaseHelper.getProjectDatabase(projectPath)
-            viewModelScope.launch {
-                projectDb.entityQueries.selectAll().asFlow().mapToList(Dispatchers.IO).collect {
-                    _projectEntities.value = it
+            launch {
+                globalDb.entityQueries.selectAll().asFlow().mapToList(Dispatchers.IO).collect {
+                    _globalEntities.value = it
+                    globalLoaded = true
+                    if (projectLoaded) _isLoaded.value = true
+                }
+            }
+
+            if (projectPath != null) {
+                val projectDb = DatabaseHelper.getProjectDatabase(projectPath)
+                launch {
+                    projectDb.entityQueries.selectAll().asFlow().mapToList(Dispatchers.IO).collect {
+                        _projectEntities.value = it
+                        projectLoaded = true
+                        if (globalLoaded) _isLoaded.value = true
+                    }
                 }
             }
         }
@@ -45,13 +63,14 @@ class EntityViewModel(private val projectPath: String?, private val viewModel: P
             withContext(Dispatchers.IO) {
                 try {
                     val db = if (isGlobal) DatabaseHelper.globalDatabase else DatabaseHelper.getProjectDatabase(projectPath!!)
-                    db.entityQueries.insertEntity(java.util.UUID.randomUUID().toString(), name, type, color, notesFilePath)
+                    db.entityQueries.insertEntity(UUID.randomUUID().toString(), name, type, color, notesFilePath)
                     println("Entity inserted successfully: $name")
                 } catch (e: Exception) {
                     System.err.println("Failed to insert entity: ${e.message}")
                     e.printStackTrace()
                 }
             }
+            viewModel?.loadEntityColors()
         }
     }
 
@@ -61,6 +80,7 @@ class EntityViewModel(private val projectPath: String?, private val viewModel: P
                 val db = if (isGlobal) DatabaseHelper.globalDatabase else DatabaseHelper.getProjectDatabase(projectPath!!)
                 db.entityQueries.updateEntity(name, type, color, notesFilePath, id)
             }
+            viewModel?.loadEntityColors()
         }
     }
 
@@ -69,6 +89,47 @@ class EntityViewModel(private val projectPath: String?, private val viewModel: P
             withContext(Dispatchers.IO) {
                 val db = if (isGlobal) DatabaseHelper.globalDatabase else DatabaseHelper.getProjectDatabase(projectPath!!)
                 db.entityQueries.deleteEntity(id)
+                deleteMarkersForEntity(isGlobal, id)
+            }
+            viewModel?.onEntityDeleted(id)
+        }
+    }
+
+    private fun deleteMarkersForEntity(isGlobal: Boolean, entityId: String) {
+        val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
+        val projectDirs = mutableSetOf<File>()
+
+        if (projectPath != null) {
+            projectDirs.add(File(projectPath))
+        }
+
+        if (isGlobal) {
+            val home = System.getProperty("user.home")
+            val baseDir = File(home, ".dungeon-master-manager")
+            if (baseDir.exists() && baseDir.isDirectory) {
+                baseDir.listFiles()?.filter { it.isDirectory && !it.name.startsWith(".") }?.forEach {
+                    projectDirs.add(it)
+                }
+            }
+        }
+
+        for (dir in projectDirs) {
+            if (!dir.exists()) continue
+            val mapFiles = dir.walkTopDown().filter { it.isFile && it.extension == "map" && !it.name.startsWith(".") }
+            for (mapFile in mapFiles) {
+                try {
+                    val text = mapFile.readText()
+                    if (text.isNotBlank()) {
+                        val mapData = json.decodeFromString<MapData>(text)
+                        val remainingMarkers = mapData.markers.filterNot { it.entityId == entityId }
+                        if (remainingMarkers.size != mapData.markers.size) {
+                            val updatedMapData = mapData.copy(markers = remainingMarkers)
+                            mapFile.writeText(json.encodeToString(updatedMapData))
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }
         }
     }
@@ -77,8 +138,9 @@ class EntityViewModel(private val projectPath: String?, private val viewModel: P
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 val destDb = if (toGlobal) DatabaseHelper.globalDatabase else DatabaseHelper.getProjectDatabase(projectPath!!)
-                destDb.entityQueries.insertEntity(java.util.UUID.randomUUID().toString(), entity.name, entity.type, entity.color, entity.notesFilePath)
+                destDb.entityQueries.insertEntity(UUID.randomUUID().toString(), entity.name, entity.type, entity.color, entity.notesFilePath)
             }
+            viewModel?.loadEntityColors()
         }
     }
 
