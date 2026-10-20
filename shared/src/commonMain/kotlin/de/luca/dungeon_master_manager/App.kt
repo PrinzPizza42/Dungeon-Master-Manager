@@ -1,15 +1,15 @@
 package de.luca.dungeon_master_manager
 
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.darkColorScheme
-import de.luca.dungeon_master_manager.data.EntityPopoutRequest
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.layout.fillMaxSize
+import de.luca.dungeon_master_manager.data.EntityPopoutRequest
 import de.luca.dungeon_master_manager.data.ProjectInfo
 import de.luca.dungeon_master_manager.ui.ProjectEditorScreen
 import de.luca.dungeon_master_manager.ui.ProjectLauncherScreen
+import de.luca.dungeon_master_manager.ui.theme.GrimoireTheme
 import de.luca.dungeon_master_manager.viewmodel.ProjectEditorViewModel
 
 sealed class Screen {
@@ -24,7 +24,7 @@ fun App(
 ) {
     var currentScreen by remember { mutableStateOf<Screen>(Screen.Launcher) }
 
-    MaterialTheme(colorScheme = darkColorScheme()) {
+    GrimoireTheme {
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background,

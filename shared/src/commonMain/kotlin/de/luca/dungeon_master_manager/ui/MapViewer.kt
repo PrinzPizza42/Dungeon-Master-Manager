@@ -17,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -150,13 +151,14 @@ fun MapViewer(
 
     var viewportSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
 
-    Box(modifier = Modifier.fillMaxSize().onSizeChanged { viewportSize = it }) {
+    Box(modifier = Modifier.fillMaxSize().clipToBounds().onSizeChanged { viewportSize = it }) {
         if (imageBitmap != null) {
             var showMarkerDialog by remember { mutableStateOf<MapMarker?>(null) }
             
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .clipToBounds()
                     .pointerInput(Unit) {
                         detectTransformGestures { centroid, pan, zoom, _ ->
                             if (!addPinMode && viewportSize.width > 0) {

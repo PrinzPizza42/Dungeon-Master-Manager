@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.unit.dp
 import de.luca.dungeon_master_manager.data.EditorTab
 import de.luca.dungeon_master_manager.data.FileExtensions
@@ -27,7 +28,7 @@ fun ContentArea(
     entities: List<de.luca.dungeonmastermanager.database.Entity> = emptyList(),
     projectPath: String = ""
 ) {
-    Box(modifier = modifier.fillMaxSize()) {
+    Box(modifier = modifier.fillMaxSize().clipToBounds()) {
         when {
             activeTab == null -> {
                 Box(

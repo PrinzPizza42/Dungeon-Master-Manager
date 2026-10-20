@@ -1,11 +1,13 @@
 package de.luca.dungeon_master_manager.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
@@ -19,6 +21,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import de.luca.dungeon_master_manager.colorElement
+import de.luca.dungeon_master_manager.ui.theme.GrimoireCard
+import de.luca.dungeon_master_manager.ui.theme.GrimoireColors
+import de.luca.dungeon_master_manager.ui.theme.GrimoireDivider
 import de.luca.dungeonmastermanager.database.Entity
 import de.luca.dungeon_master_manager.viewmodel.EntityViewModel
 
@@ -27,7 +32,7 @@ import de.luca.dungeon_master_manager.viewmodel.EntityViewModel
 fun EntityManagerDialog(
     viewModel: EntityViewModel,
     onDismiss: () -> Unit,
-    isGlobalOnly: Boolean = false // If true, only shows Global entities (for Launcher screen)
+    isGlobalOnly: Boolean = false
 ) {
     val projectEntities by viewModel.projectEntities.collectAsState()
     val globalEntities by viewModel.globalEntities.collectAsState()
@@ -41,33 +46,70 @@ fun EntityManagerDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Surface(
-            modifier = Modifier.fillMaxWidth(0.8f).fillMaxHeight(0.8f),
-            shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.surface
+            modifier = Modifier.fillMaxWidth(0.85f).fillMaxHeight(0.85f),
+            shape = RoundedCornerShape(10.dp),
+            color = GrimoireColors.Surface,
+            border = BorderStroke(1.dp, GrimoireColors.BorderBronze)
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 // Header
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Entity Manager", style = MaterialTheme.typography.headlineSmall)
+                    Text(
+                        "Entity Bestiary & Dramatis Personae",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = GrimoireColors.GoldPrimary
+                    )
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, "Close")
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = GrimoireColors.ParchmentMuted
+                        )
                     }
                 }
 
                 if (!isGlobalOnly) {
-                    PrimaryTabRow(selectedTabIndex = selectedTab) {
-                        Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }) {
-                            Text("Project Entities", modifier = Modifier.padding(16.dp))
+                    PrimaryTabRow(
+                        selectedTabIndex = selectedTab,
+                        containerColor = GrimoireColors.SurfaceLow,
+                        contentColor = GrimoireColors.GoldPrimary,
+                        indicator = {
+                            TabRowDefaults.PrimaryIndicator(
+                                modifier = Modifier.tabIndicatorOffset(selectedTab),
+                                color = GrimoireColors.GoldPrimary
+                            )
                         }
-                        Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }) {
-                            Text("Global Entities", modifier = Modifier.padding(16.dp))
-                        }
+                    ) {
+                        Tab(
+                            selected = selectedTab == 0,
+                            onClick = { selectedTab = 0 },
+                            text = {
+                                Text(
+                                    "Project Entities",
+                                    color = if (selectedTab == 0) GrimoireColors.GoldPrimary else GrimoireColors.ParchmentMuted,
+                                    fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
+                        )
+                        Tab(
+                            selected = selectedTab == 1,
+                            onClick = { selectedTab = 1 },
+                            text = {
+                                Text(
+                                    "Global Entities",
+                                    color = if (selectedTab == 1) GrimoireColors.GoldPrimary else GrimoireColors.ParchmentMuted,
+                                    fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
+                        )
                     }
                 }
+
+                GrimoireDivider()
 
                 // Content
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -76,21 +118,22 @@ fun EntityManagerDialog(
 
                     if (entitiesToShow.isEmpty()) {
                         Text(
-                            "No entities found.",
+                            "No entities recorded yet.",
                             modifier = Modifier.align(Alignment.Center),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = GrimoireColors.ParchmentMuted
                         )
                     } else {
-                        // Group by type
                         val grouped = entitiesToShow.groupBy { it.type }
-                        LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                        LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp)) {
                             grouped.forEach { (type, entities) ->
                                 item {
                                     Text(
-                                        type,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.padding(vertical = 8.dp)
+                                        text = type.uppercase(),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = GrimoireColors.GoldPrimary,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 1.sp,
+                                        modifier = Modifier.padding(top = 12.dp, bottom = 6.dp)
                                     )
                                 }
                                 items(entities) { entity ->
@@ -108,16 +151,25 @@ fun EntityManagerDialog(
                     }
                 }
 
+                GrimoireDivider()
+
                 // Footer
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
                     horizontalArrangement = Arrangement.End
                 ) {
-                    Button(onClick = { 
-                        entityToEdit = null
-                        showCreateDialog = true 
-                    }) {
-                        Text("Create Entity")
+                    Button(
+                        onClick = { 
+                            entityToEdit = null
+                            showCreateDialog = true 
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = GrimoireColors.GoldPrimary,
+                            contentColor = GrimoireColors.Background
+                        ),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text("+ Create Entity", fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -155,32 +207,50 @@ private fun EntityRow(
     onCopy: (Entity) -> Unit,
     onEdit: (Entity) -> Unit
 ) {
-    Card(
+    GrimoireCard(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        shape = RoundedCornerShape(6.dp),
+        borderHoverColor = GrimoireColors.GoldPrimary
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val colorVal = try { Color(entity.color?.toULong() ?: 0xFFFFFFFFuL) } catch(e: Exception) { Color.White }
-            Box(modifier = Modifier.size(16.dp).background(colorVal, shape = MaterialTheme.shapes.small))
-            Spacer(Modifier.width(16.dp))
+            val colorVal = try { Color(entity.color?.toULong() ?: 0xFFFFFFFFuL) } catch(e: Exception) { GrimoireColors.GoldPrimary }
+            Box(
+                modifier = Modifier
+                    .size(16.dp)
+                    .background(colorVal, shape = RoundedCornerShape(3.dp))
+                    .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(3.dp))
+            )
+            Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(entity.name, fontWeight = FontWeight.Bold)
+                Text(
+                    text = entity.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = GrimoireColors.ParchmentLight
+                )
                 if (!entity.notesFilePath.isNullOrBlank()) {
-                    Text("Notes: ${entity.notesFilePath}", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        text = "Notes: ${entity.notesFilePath}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = GrimoireColors.ParchmentMuted
+                    )
                 }
             }
             TextButton(onClick = { onEdit(entity) }) {
-                Text("Edit")
+                Text("Edit", color = GrimoireColors.GoldPrimary)
             }
             if (canCopy) {
                 TextButton(onClick = { onCopy(entity) }) {
-                    Text(if (isGlobal) "Copy to Project" else "Copy to Global")
+                    Text(if (isGlobal) "Copy to Campaign" else "Copy to Global", color = GrimoireColors.ParchmentLight)
                 }
             }
-            TextButton(onClick = { onDelete(entity) }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
+            TextButton(
+                onClick = { onDelete(entity) },
+                colors = ButtonDefaults.textButtonColors(contentColor = GrimoireColors.CrimsonError)
+            ) {
                 Text("Delete")
             }
         }
@@ -206,29 +276,54 @@ fun CreateEntityDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("New ${if(isGlobal) "Global " else ""}Entity") },
+        title = { 
+            Text(
+                "New ${if (isGlobal) "Global " else ""}Entity",
+                style = MaterialTheme.typography.titleLarge,
+                color = GrimoireColors.GoldPrimary
+            ) 
+        },
+        containerColor = GrimoireColors.SurfaceCard,
+        shape = RoundedCornerShape(8.dp),
         text = {
             Column {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Name") },
+                    label = { Text("Name", color = GrimoireColors.ParchmentMuted) },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = GrimoireColors.GoldPrimary,
+                        unfocusedBorderColor = GrimoireColors.BorderBronze,
+                        focusedTextColor = GrimoireColors.ParchmentLight,
+                        unfocusedTextColor = GrimoireColors.ParchmentLight,
+                    )
                 )
-                Spacer(Modifier.height(8.dp))
-                Text("Type:", style = MaterialTheme.typography.labelMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 4.dp)) {
+                Spacer(Modifier.height(10.dp))
+                Text("Type:", style = MaterialTheme.typography.labelMedium, color = GrimoireColors.ParchmentMuted)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 4.dp)) {
                     types.forEach { t ->
                         FilterChip(
                             selected = type == t,
                             onClick = { type = t },
-                            label = { Text(t) }
+                            label = { Text(t) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = GrimoireColors.GoldPrimary,
+                                selectedLabelColor = GrimoireColors.Background,
+                                containerColor = GrimoireColors.SurfaceLow,
+                                labelColor = GrimoireColors.ParchmentLight
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                enabled = true,
+                                selected = type == t,
+                                borderColor = if (type == t) GrimoireColors.GoldPrimary else GrimoireColors.BorderBronze
+                            )
                         )
                     }
                 }
-                Spacer(Modifier.height(8.dp))
-                Text("Color:", style = MaterialTheme.typography.labelMedium)
+                Spacer(Modifier.height(10.dp))
+                Text("Color:", style = MaterialTheme.typography.labelMedium, color = GrimoireColors.ParchmentMuted)
                 colorElement(
                     Color(color.toULong()),
                     showColorPicker,
@@ -238,18 +333,28 @@ fun CreateEntityDialog(
                 )
                 Spacer(Modifier.height(16.dp))
                 
-                Text("Notes File:", style = MaterialTheme.typography.labelMedium)
+                Text("Notes File:", style = MaterialTheme.typography.labelMedium, color = GrimoireColors.ParchmentMuted)
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                     OutlinedTextField(
                         value = notesPath,
                         onValueChange = { notesPath = it },
                         modifier = Modifier.weight(1f),
                         singleLine = true,
-                        placeholder = { Text("No file selected") },
-                        readOnly = true
+                        placeholder = { Text("No file selected", color = GrimoireColors.ParchmentDim) },
+                        readOnly = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = GrimoireColors.GoldPrimary,
+                            unfocusedBorderColor = GrimoireColors.BorderBronze,
+                            focusedTextColor = GrimoireColors.ParchmentLight,
+                            unfocusedTextColor = GrimoireColors.ParchmentLight,
+                        )
                     )
                     Spacer(Modifier.width(8.dp))
-                    Button(onClick = { showFileSelector = true }) {
+                    OutlinedButton(
+                        onClick = { showFileSelector = true },
+                        border = BorderStroke(1.dp, GrimoireColors.BorderBronze),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = GrimoireColors.GoldPrimary)
+                    ) {
                         Text("Browse")
                     }
                 }
@@ -261,11 +366,17 @@ fun CreateEntityDialog(
                     if (name.isNotBlank()) {
                         onCreate(name, type, color, notesPath)
                     }
-                }
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = GrimoireColors.GoldPrimary,
+                    contentColor = GrimoireColors.Background
+                )
             ) { Text(if (initialEntity != null) "Save" else "Create") }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { 
+                Text("Cancel", color = GrimoireColors.ParchmentMuted) 
+            }
         }
     )
 
@@ -274,7 +385,15 @@ fun CreateEntityDialog(
         
         AlertDialog(
             onDismissRequest = { showFileSelector = false },
-            title = { Text("Select Notes File") },
+            title = { 
+                Text(
+                    "Select Notes File",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = GrimoireColors.GoldPrimary
+                ) 
+            },
+            containerColor = GrimoireColors.SurfaceCard,
+            shape = RoundedCornerShape(8.dp),
             text = {
                 Column(modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp)) {
                     Button(
@@ -283,17 +402,21 @@ fun CreateEntityDialog(
                             val newPath = viewModel.createTemplateFile(isGlobal, name.ifBlank { "Unnamed" }, type)
                             notesPath = newPath
                             showFileSelector = false
-                        }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = GrimoireColors.GoldContainer,
+                            contentColor = GrimoireColors.GoldBright
+                        ),
+                        border = BorderStroke(1.dp, GrimoireColors.BorderGold)
                     ) {
                         Text("+ Create New Template File in ${type}s/")
                     }
                     
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    GrimoireDivider(modifier = Modifier.padding(vertical = 8.dp))
                     
                     if (availableFiles.isEmpty()) {
-                        Text("No markdown files found.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("No markdown files found.", color = GrimoireColors.ParchmentMuted)
                     } else {
-                        // Display files with priority coloring for those in the matching type folder
                         val typePrefix = "${type}s${java.io.File.separator}"
                         LazyColumn {
                             items(availableFiles) { file ->
@@ -310,7 +433,7 @@ fun CreateEntityDialog(
                                 ) {
                                     Text(
                                         text = file,
-                                        color = if (isRelevant) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                        color = if (isRelevant) GrimoireColors.GoldPrimary else GrimoireColors.ParchmentLight,
                                         fontWeight = if (isRelevant) FontWeight.Bold else FontWeight.Normal
                                     )
                                 }
@@ -320,7 +443,9 @@ fun CreateEntityDialog(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showFileSelector = false }) { Text("Close") }
+                TextButton(onClick = { showFileSelector = false }) { 
+                    Text("Close", color = GrimoireColors.ParchmentMuted) 
+                }
             }
         )
     }

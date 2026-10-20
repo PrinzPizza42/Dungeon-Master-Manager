@@ -1,16 +1,29 @@
 package de.luca.dungeon_master_manager.ui
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ContextMenuDataProvider
+import androidx.compose.foundation.ContextMenuItem
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.OffsetMapping
@@ -19,16 +32,9 @@ import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.ContextMenuDataProvider
-import androidx.compose.foundation.ContextMenuItem
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
+import de.luca.dungeon_master_manager.ui.theme.GrimoireColors
+import de.luca.dungeon_master_manager.ui.theme.GrimoireDivider
+import de.luca.dungeon_master_manager.ui.theme.LocalFantasyFontFamily
 import de.luca.dungeonmastermanager.database.Entity
 
 @Composable
@@ -100,57 +106,106 @@ fun MarkdownEditor(
         onContentChange(newContent)
     }
 
-    Column(modifier = modifier.fillMaxSize()) {
+    Column(modifier = modifier.fillMaxSize().background(GrimoireColors.Background)) {
         // Toolbar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceContainer)
-                .padding(8.dp),
+                .background(GrimoireColors.SurfaceLow)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Button(
+            OutlinedButton(
                 onClick = { 
                     onContentChange(content + "\n# New Heading\n")
                 },
-                modifier = Modifier.padding(end = 8.dp)
+                border = BorderStroke(1.dp, GrimoireColors.BorderBronze),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = GrimoireColors.GoldPrimary),
+                shape = RoundedCornerShape(4.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                modifier = Modifier.padding(end = 8.dp).defaultMinSize(minHeight = 30.dp)
             ) {
-                Text("+ Heading")
+                Text("+ Heading", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
             }
 
             if (!isPreviewMode) {
-                Button(onClick = { applyFormat("**") }, modifier = Modifier.padding(end = 4.dp)) {
-                    Text("B", fontWeight = FontWeight.Bold)
+                OutlinedButton(
+                    onClick = { applyFormat("**") },
+                    border = BorderStroke(1.dp, GrimoireColors.BorderBronze),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = GrimoireColors.ParchmentLight),
+                    shape = RoundedCornerShape(4.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    modifier = Modifier.padding(end = 4.dp).defaultMinSize(minWidth = 32.dp, minHeight = 30.dp)
+                ) {
+                    Text("B", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
-                Button(onClick = { applyFormat("*") }, modifier = Modifier.padding(end = 4.dp)) {
-                    Text("I", fontStyle = FontStyle.Italic)
+                OutlinedButton(
+                    onClick = { applyFormat("*") },
+                    border = BorderStroke(1.dp, GrimoireColors.BorderBronze),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = GrimoireColors.ParchmentLight),
+                    shape = RoundedCornerShape(4.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    modifier = Modifier.padding(end = 4.dp).defaultMinSize(minWidth = 32.dp, minHeight = 30.dp)
+                ) {
+                    Text("I", fontStyle = FontStyle.Italic, fontSize = 13.sp)
                 }
-                Button(onClick = { applyFormat("__") }, modifier = Modifier.padding(end = 4.dp)) {
-                    Text("U", textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline)
+                OutlinedButton(
+                    onClick = { applyFormat("__") },
+                    border = BorderStroke(1.dp, GrimoireColors.BorderBronze),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = GrimoireColors.ParchmentLight),
+                    shape = RoundedCornerShape(4.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    modifier = Modifier.padding(end = 4.dp).defaultMinSize(minWidth = 32.dp, minHeight = 30.dp)
+                ) {
+                    Text("U", textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline, fontSize = 13.sp)
                 }
             }
 
             Spacer(modifier = Modifier.weight(1f))
 
-            TabRow(
-                selectedTabIndex = if (isPreviewMode) 1 else 0,
-                modifier = Modifier.width(200.dp),
-                containerColor = Color.Transparent,
+            // Edit vs Preview tab toggle
+            Row(
+                modifier = Modifier
+                    .background(GrimoireColors.SurfaceCard, RoundedCornerShape(4.dp))
+                    .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(4.dp))
+                    .padding(2.dp)
             ) {
-                Tab(
-                    selected = !isPreviewMode,
-                    onClick = { isPreviewMode = false },
-                    text = { Text("Edit") }
-                )
-                Tab(
-                    selected = isPreviewMode,
-                    onClick = { isPreviewMode = true },
-                    text = { Text("Preview") }
-                )
+                Box(
+                    modifier = Modifier
+                        .clickable { isPreviewMode = false }
+                        .background(
+                            if (!isPreviewMode) GrimoireColors.GoldPrimary else Color.Transparent,
+                            RoundedCornerShape(3.dp)
+                        )
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        "Edit",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (!isPreviewMode) GrimoireColors.Background else GrimoireColors.ParchmentMuted
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .clickable { isPreviewMode = true }
+                        .background(
+                            if (isPreviewMode) GrimoireColors.GoldPrimary else Color.Transparent,
+                            RoundedCornerShape(3.dp)
+                        )
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        "Preview",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isPreviewMode) GrimoireColors.Background else GrimoireColors.ParchmentMuted
+                    )
+                }
             }
         }
 
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        GrimoireDivider()
 
         val focusRequester = remember { FocusRequester() }
 
@@ -221,12 +276,13 @@ private fun MarkdownEdit(
     onOpenEntityPopout: (String) -> Unit,
     focusRequester: FocusRequester
 ) {
-    val primaryColor = MaterialTheme.colorScheme.primary
+    val primaryColor = GrimoireColors.GoldPrimary
+    val fantasyFamily = LocalFantasyFontFamily.current
 
-    val markdownTransformation = remember(primaryColor, textFieldValue.selection, entities) {
+    val markdownTransformation = remember(primaryColor, textFieldValue.selection, entities, fantasyFamily) {
         object : VisualTransformation {
             override fun filter(text: AnnotatedString): TransformedText {
-                val (annotated, mapping) = parseMarkdown(text.text, primaryColor, textFieldValue.selection, entities)
+                val (annotated, mapping) = parseMarkdown(text.text, primaryColor, textFieldValue.selection, entities, fantasyFamily)
                 return TransformedText(annotated, mapping)
             }
         }
@@ -293,10 +349,11 @@ private fun MarkdownEdit(
                 onValueChange = onValueChange,
                 modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
                 textStyle = TextStyle(
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontSize = 16.sp
+                    color = GrimoireColors.ParchmentLight,
+                    fontSize = 16.sp,
+                    lineHeight = 24.sp
                 ),
-                cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+                cursorBrush = SolidColor(GrimoireColors.GoldPrimary),
                 visualTransformation = markdownTransformation
             )
         }
@@ -307,29 +364,37 @@ private fun MarkdownEdit(
             
             if (filtered.isNotEmpty()) {
                 Surface(
-                    modifier = Modifier.padding(top = 24.dp).width(250.dp).heightIn(max = 200.dp),
+                    modifier = Modifier
+                        .padding(top = 24.dp)
+                        .width(260.dp)
+                        .heightIn(max = 220.dp)
+                        .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(6.dp)),
+                    color = GrimoireColors.SurfaceCard,
                     shadowElevation = 8.dp,
-                    shape = MaterialTheme.shapes.medium
+                    shape = RoundedCornerShape(6.dp)
                 ) {
                     LazyColumn {
                         items(filtered.take(10)) { ent ->
                             Row(
-                                modifier = Modifier.fillMaxWidth().clickable {
-                                    val text = textFieldValue.text
-                                    val before = text.substring(0, dropdownStartOffset - 1) // include @
-                                    val after = text.substring(textFieldValue.selection.start)
-                                    val newContent = "$before@[${ent.id}]$after"
-                                    val newSelection = androidx.compose.ui.text.TextRange(before.length + ent.id.length + 3)
-                                    onValueChange(TextFieldValue(newContent, newSelection))
-                                }.padding(12.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        val text = textFieldValue.text
+                                        val before = text.substring(0, dropdownStartOffset - 1) // include @
+                                        val after = text.substring(textFieldValue.selection.start)
+                                        val newContent = "$before@[${ent.id}]$after"
+                                        val newSelection = androidx.compose.ui.text.TextRange(before.length + ent.id.length + 3)
+                                        onValueChange(TextFieldValue(newContent, newSelection))
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                val c = try { Color(ent.color?.toULong() ?: 0xFFFFFFFFuL) } catch(e: Exception) { Color.Gray }
-                                Box(modifier = Modifier.size(12.dp).background(c, MaterialTheme.shapes.small))
+                                val c = try { Color(ent.color?.toULong() ?: 0xFFFFFFFFuL) } catch(e: Exception) { GrimoireColors.GoldPrimary }
+                                Box(modifier = Modifier.size(10.dp).background(c, RoundedCornerShape(2.dp)))
                                 Spacer(Modifier.width(8.dp))
-                                Text(ent.name, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                Text(ent.name, fontWeight = FontWeight.Bold, color = GrimoireColors.ParchmentLight)
                                 Spacer(Modifier.width(8.dp))
-                                Text("(${ent.type})", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                                Text("(${ent.type})", color = GrimoireColors.ParchmentMuted, fontSize = 12.sp)
                             }
                         }
                     }
@@ -341,9 +406,10 @@ private fun MarkdownEdit(
 
 @Composable
 private fun MarkdownPreview(content: String, entities: List<Entity>, onOpenEntityPopout: (String) -> Unit) {
-    val primaryColor = MaterialTheme.colorScheme.primary
-    val (baseAnnotatedString, _) = remember(content, primaryColor, entities) {
-        parseMarkdown(content, primaryColor, null, entities) // null selection hides all syntax
+    val primaryColor = GrimoireColors.GoldPrimary
+    val fantasyFamily = LocalFantasyFontFamily.current
+    val (baseAnnotatedString, _) = remember(content, primaryColor, entities, fantasyFamily) {
+        parseMarkdown(content, primaryColor, null, entities, fantasyFamily) // null selection hides all syntax
     }
     
     val finalAnnotatedString = remember(baseAnnotatedString, entities, primaryColor, onOpenEntityPopout) {
@@ -381,8 +447,9 @@ private fun MarkdownPreview(content: String, entities: List<Entity>, onOpenEntit
     Text(
         text = finalAnnotatedString,
         style = TextStyle(
-            color = MaterialTheme.colorScheme.onSurface,
-            fontSize = 16.sp
+            color = GrimoireColors.ParchmentLight,
+            fontSize = 16.sp,
+            lineHeight = 24.sp
         )
     )
 }
@@ -391,7 +458,8 @@ private fun parseMarkdown(
     text: String,
     primaryColor: Color,
     cursorSelection: androidx.compose.ui.text.TextRange?,
-    entities: List<Entity> = emptyList()
+    entities: List<Entity> = emptyList(),
+    fantasyFamily: FontFamily = FontFamily.Serif
 ): Pair<AnnotatedString, OffsetMapping> {
     val builder = AnnotatedString.Builder()
     
@@ -405,8 +473,6 @@ private fun parseMarkdown(
         return cursorSelection.start <= range.last + 1 && cursorSelection.end >= range.first - 1
     }
 
-    // A simple regex approach to find all tokens in order
-    // Tokenize: Bold, Italic, Underline, Entity, Headings
     val regex = Regex("\\*\\*(.*?)\\*\\*|(?<!\\*)\\*(?!\\*)(.*?)(?<!\\*)\\*(?!\\*)|__(.*?)__|(?<!\\\\)@\\[(.*?)\\]|^(#{1,6}) (.*)$", RegexOption.MULTILINE)
     
     val matches = regex.findAll(text)
@@ -428,17 +494,17 @@ private fun parseMarkdown(
             val content = match.groups[1]!!.value
             if (!isCursorIn) {
                 // hide **
-                origToTrans.add(builder.length) // *
-                origToTrans.add(builder.length) // *
+                origToTrans.add(builder.length)
+                origToTrans.add(builder.length)
                 val transStart = builder.length
                 for (i in content.indices) {
                     origToTrans.add(builder.length)
                     builder.append(content[i])
                     transToOrig.add(origStart + 2 + i)
                 }
-                origToTrans.add(builder.length) // *
-                origToTrans.add(builder.length) // *
-                builder.addStyle(SpanStyle(fontWeight = FontWeight.Bold), transStart, builder.length)
+                origToTrans.add(builder.length)
+                origToTrans.add(builder.length)
+                builder.addStyle(SpanStyle(fontWeight = FontWeight.Bold, color = GrimoireColors.ParchmentLight), transStart, builder.length)
             } else {
                 val transStart = builder.length
                 for (i in match.range) {
@@ -500,21 +566,18 @@ private fun parseMarkdown(
                 val ent = entities.find { it.id == id }
                 val color = if (ent?.color != null) {
                     try { Color(ent.color.toULong()) } catch(e: Exception) { primaryColor }
-                } else Color.Red
+                } else GrimoireColors.CrimsonError
                 
                 val displayText = ent?.name ?: "Unknown Entity"
 
                 if (!isCursorIn) {
-                    val transStart = builder.length
-                    
-                    // Map entire original token to the start of the display text
                     for (i in match.range) {
                         origToTrans.add(builder.length)
                     }
-                    
+                    val transStart = builder.length
                     for (i in displayText.indices) {
                         builder.append(displayText[i])
-                        transToOrig.add(match.range.last) // all transformed chars map to the end of the token
+                        transToOrig.add(match.range.last)
                     }
 
                     builder.addStyle(SpanStyle(color = color, fontWeight = FontWeight.Bold, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline), transStart, builder.length)
@@ -530,7 +593,6 @@ private fun parseMarkdown(
                     builder.addStringAnnotation("entity", id, transStart, builder.length)
                 }
             } else {
-                // Just append raw
                 for (i in match.range) {
                     origToTrans.add(builder.length)
                     builder.append(text[i])
@@ -541,12 +603,11 @@ private fun parseMarkdown(
             val hashes = match.groups[5]!!.value
             val content = match.groups[6]!!.value
             val fontSize = when (hashes.length) {
-                1 -> 24.sp
-                2 -> 20.sp
+                1 -> 26.sp
+                2 -> 22.sp
                 else -> 18.sp
             }
             if (cursorSelection == null) {
-                // Preview mode: hide "# "
                 for (i in 0..hashes.length) {
                     origToTrans.add(builder.length)
                 }
@@ -556,7 +617,16 @@ private fun parseMarkdown(
                     builder.append(content[i])
                     transToOrig.add(origStart + hashes.length + 1 + i)
                 }
-                builder.addStyle(SpanStyle(color = primaryColor, fontWeight = FontWeight.Bold, fontSize = fontSize), transStart, builder.length)
+                builder.addStyle(
+                    SpanStyle(
+                        color = primaryColor,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = fontSize,
+                        fontFamily = fantasyFamily
+                    ),
+                    transStart,
+                    builder.length
+                )
             } else {
                 val transStart = builder.length
                 for (i in match.range) {
@@ -564,7 +634,16 @@ private fun parseMarkdown(
                     builder.append(text[i])
                     transToOrig.add(i)
                 }
-                builder.addStyle(SpanStyle(color = primaryColor, fontWeight = FontWeight.Bold, fontSize = fontSize), transStart, builder.length)
+                builder.addStyle(
+                    SpanStyle(
+                        color = primaryColor,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = fontSize,
+                        fontFamily = fantasyFamily
+                    ),
+                    transStart,
+                    builder.length
+                )
             }
         }
     }
