@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import de.luca.dungeon_master_manager.data.FileNode
+import de.luca.dungeon_master_manager.data.FileExtensions
 
 import androidx.compose.ui.input.pointer.PointerButton
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -87,9 +88,11 @@ private fun FileTreeNodeRow(
         node.isDirectory && isExpanded -> "📂"
         node.isDirectory -> "📁"
         node.isVirtualHeading -> "#️⃣"
-        node.extension == "md" -> "📝"
-        node.extension == "map" -> "🗺"
-        node.extension in setOf("png", "jpg", "jpeg", "gif", "bmp") -> "🖼"
+        FileExtensions.isMarkdown(node.extension) -> "📝"
+        FileExtensions.isMap(node.extension) -> "🗺"
+        FileExtensions.isImage(node.extension) -> "🖼"
+        node.extension == "log" -> "📋"
+        FileExtensions.isText(node.extension) -> "📄"
         else -> "📄"
     }
 

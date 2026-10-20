@@ -17,6 +17,7 @@ import de.luca.dungeon_master_manager.viewmodel.ProjectEditorViewModel
  * Main project editor screen with sidebar file tree, tab bar, and content area.
  */
 import de.luca.dungeon_master_manager.data.EntityPopoutRequest
+import de.luca.dungeon_master_manager.data.FileExtensions
 import java.awt.Cursor
 
 @Composable
@@ -164,10 +165,15 @@ fun StandaloneFileEditorWindow(
 ) {
     var fileContent by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(true) }
+    val isImage = FileExtensions.isImage(tab.extension)
     
     LaunchedEffect(tab.filePath) {
         isLoading = true
-        fileContent = de.luca.dungeon_master_manager.data.FileService().readFile(tab.filePath)
+        if (!isImage) {
+            fileContent = de.luca.dungeon_master_manager.data.FileService().readFile(tab.filePath)
+        } else {
+            fileContent = ""
+        }
         isLoading = false
     }
 
@@ -175,7 +181,9 @@ fun StandaloneFileEditorWindow(
     LaunchedEffect(contentToSave) {
         contentToSave?.let { content ->
             kotlinx.coroutines.delay(500)
-            de.luca.dungeon_master_manager.data.FileService().writeFile(tab.filePath, content)
+            if (!isImage) {
+                de.luca.dungeon_master_manager.data.FileService().writeFile(tab.filePath, content)
+            }
         }
     }
 
@@ -326,7 +334,7 @@ private fun EditorSidebar(
                     OutlinedTextField(
                         value = fileName,
                         onValueChange = { fileName = it },
-                        label = { Text("File Name (e.g. tavern or tavern.md)") },
+                        label = { Text("File Name (e.g. notes.txt or story.md)") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )

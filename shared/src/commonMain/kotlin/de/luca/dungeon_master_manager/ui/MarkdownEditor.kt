@@ -26,6 +26,9 @@ import androidx.compose.ui.window.PopupProperties
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import de.luca.dungeonmastermanager.database.Entity
 
 @Composable
@@ -149,7 +152,25 @@ fun MarkdownEditor(
 
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-        Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        val focusRequester = remember { FocusRequester() }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) {
+                    if (!isPreviewMode) {
+                        focusRequester.requestFocus()
+                        val targetLen = textFieldValue.text.length
+                        textFieldValue = textFieldValue.copy(
+                            selection = androidx.compose.ui.text.TextRange(targetLen)
+                        )
+                    }
+                }
+                .padding(16.dp)
+        ) {
             if (isPreviewMode) {
                 MarkdownPreview(content, entities, onOpenEntityPopout)
             } else {
@@ -157,6 +178,7 @@ fun MarkdownEditor(
                     textFieldValue = textFieldValue,
                     entities = entities,
                     onOpenEntityPopout = onOpenEntityPopout,
+                    focusRequester = focusRequester,
                     onValueChange = { newValue ->
                         var updatedSelection = newValue.selection
                         val text = newValue.text
@@ -196,7 +218,8 @@ private fun MarkdownEdit(
     entities: List<Entity>,
     onValueChange: (TextFieldValue) -> Unit,
     onFormat: (String) -> Unit,
-    onOpenEntityPopout: (String) -> Unit
+    onOpenEntityPopout: (String) -> Unit,
+    focusRequester: FocusRequester
 ) {
     val primaryColor = MaterialTheme.colorScheme.primary
 
@@ -228,7 +251,18 @@ private fun MarkdownEdit(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) {
+                focusRequester.requestFocus()
+                val targetLen = textFieldValue.text.length
+                onValueChange(textFieldValue.copy(selection = androidx.compose.ui.text.TextRange(targetLen)))
+            }
+    ) {
         ContextMenuDataProvider(
             items = {
                 val items = mutableListOf(
@@ -257,7 +291,7 @@ private fun MarkdownEdit(
             BasicTextField(
                 value = textFieldValue,
                 onValueChange = onValueChange,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
                 textStyle = TextStyle(
                     color = MaterialTheme.colorScheme.onSurface,
                     fontSize = 16.sp

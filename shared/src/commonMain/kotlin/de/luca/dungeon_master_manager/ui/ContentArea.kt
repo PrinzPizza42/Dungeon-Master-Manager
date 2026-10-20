@@ -11,6 +11,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import de.luca.dungeon_master_manager.data.EditorTab
+import de.luca.dungeon_master_manager.data.FileExtensions
 
 /**
  * Dispatches content rendering based on the active tab's file extension.
@@ -57,17 +58,17 @@ fun ContentArea(
 
             else -> {
                 // Use viewer based on file extension
-                when (activeTab.extension) {
-                    "md" -> key(activeTab.filePath) {
+                when {
+                    FileExtensions.isMarkdown(activeTab.extension) -> key(activeTab.filePath) {
                         MarkdownEditor(
-                            content = fileContent ?: "", 
+                            content = fileContent ?: "",
                             onContentChange = onContentChange,
                             modifier = Modifier.fillMaxSize(),
                             onOpenEntityPopout = onOpenEntityPopout,
                             entities = entities
                         )
                     }
-                    "map" -> key(activeTab.filePath) {
+                    FileExtensions.isMap(activeTab.extension) -> key(activeTab.filePath) {
                         MapViewer(
                             projectPath = projectPath,
                             content = fileContent ?: "",
@@ -75,18 +76,34 @@ fun ContentArea(
                             onOpenEntityPopout = onOpenEntityPopout
                         )
                     }
-                    "png", "jpg", "jpeg", "gif", "bmp" -> PlaceholderContentView(
-                        "Image Viewer",
-                        "Image display coming in a future phase"
-                    )
-                    else -> RawTextContentView(fileContent ?: "", modifier = Modifier.fillMaxSize())
+                    FileExtensions.isImage(activeTab.extension) -> key(activeTab.filePath) {
+                        ImageViewer(
+                            filePath = activeTab.filePath,
+                            fileName = activeTab.fileName,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    FileExtensions.isText(activeTab.extension) -> key(activeTab.filePath) {
+                        PlainTextEditor(
+                            content = fileContent ?: "",
+                            onContentChange = onContentChange,
+                            fileName = activeTab.fileName,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    else -> key(activeTab.filePath) {
+                        PlainTextEditor(
+                            content = fileContent ?: "",
+                            onContentChange = onContentChange,
+                            fileName = activeTab.fileName,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
                 }
             }
         }
     }
 }
-
-
 
 /**
  * Raw text viewer for unknown file types.

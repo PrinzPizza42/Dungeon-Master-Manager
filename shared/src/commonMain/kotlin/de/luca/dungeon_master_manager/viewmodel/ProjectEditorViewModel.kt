@@ -3,6 +3,7 @@ package de.luca.dungeon_master_manager.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import de.luca.dungeon_master_manager.data.EditorTab
+import de.luca.dungeon_master_manager.data.FileExtensions
 import de.luca.dungeon_master_manager.data.FileNode
 import de.luca.dungeon_master_manager.data.FileService
 import de.luca.dungeon_master_manager.data.MapData
@@ -209,8 +210,11 @@ class ProjectEditorViewModel(
 
     /** Update file content and auto-save after debounce */
     fun updateActiveFileContent(newContent: String) {
-        _activeFileContent.value = newContent
         val activePath = _activeTabPath.value ?: return
+        val ext = activePath.substringAfterLast('.', "").lowercase()
+        if (FileExtensions.isImage(ext)) return
+
+        _activeFileContent.value = newContent
 
         saveJob?.cancel()
         saveJob = viewModelScope.launch {
@@ -257,6 +261,14 @@ class ProjectEditorViewModel(
     }
 
     private fun loadFileContent(filePath: String) {
+        val ext = filePath.substringAfterLast('.', "").lowercase()
+        if (FileExtensions.isImage(ext)) {
+            // Binary images are rendered by ImageViewer directly from disk
+            _activeFileContent.value = ""
+            _isLoadingContent.value = false
+            return
+        }
+
         viewModelScope.launch {
             _isLoadingContent.value = true
             try {
@@ -285,6 +297,8 @@ class ProjectEditorViewModel(
                         fileService.writeFile(newFile.absolutePath, "# ${safeName.removeSuffix(".md")}\n\n")
                     } else if (safeName.endsWith(".map")) {
                         fileService.writeFile(newFile.absolutePath, "{\"imagePath\": \"\", \"markers\": []}")
+                    } else {
+                        fileService.writeFile(newFile.absolutePath, "")
                     }
                     
                     loadFileTree()
