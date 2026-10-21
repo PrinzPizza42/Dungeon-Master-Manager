@@ -1,8 +1,11 @@
 package de.luca.dungeon_master_manager.ui
 
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlin.math.pow
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -59,7 +62,7 @@ import java.io.File
 import java.util.UUID
 
 private const val MIN_MAP_ZOOM = 0.48f
-private const val MAX_MAP_ZOOM = 5.0f
+private const val MAX_MAP_ZOOM = 50.0f
 
 @Composable
 fun MapViewer(
@@ -81,23 +84,13 @@ fun MapViewer(
     }
 
     var scale by remember { mutableStateOf(1f) }
-    val animatedScale = animateFloatAsState(
-        targetValue = scale
-    )
     var offsetX by remember { mutableStateOf(0f) }
     var offsetY by remember { mutableStateOf(0f) }
-    val animatedOffsetX = animateFloatAsState(targetValue = offsetX,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-    )
-    val animatedOffsetY = animateFloatAsState(targetValue = offsetY,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-    )
+    var targetScale by remember { mutableStateOf(1f) }
+    var targetOffsetX by remember { mutableStateOf(0f) }
+    var targetOffsetY by remember { mutableStateOf(0f) }
+    val coroutineScope = rememberCoroutineScope()
+    var zoomJob by remember { mutableStateOf<Job?>(null) }
 
     val viewModel = remember(projectPath) { de.luca.dungeon_master_manager.viewmodel.EntityViewModel(
         projectPath,
@@ -183,8 +176,8 @@ fun MapViewer(
         if (!isEcoMode) {
             GrimoireAmbientChamber(
                 modifier = Modifier.fillMaxSize(),
-                panOffset = androidx.compose.ui.geometry.Offset(animatedOffsetX.value, animatedOffsetY.value),
-                zoomScale = animatedScale.value
+                panOffset = androidx.compose.ui.geometry.Offset(offsetX, offsetY),
+                zoomScale = scale
             )
         } else {
             Box(modifier = Modifier.fillMaxSize().background(GrimoireColors.Background))
@@ -223,28 +216,24 @@ fun MapViewer(
                     .fillMaxSize()
                     .clipToBounds()
                     .pointerInput(Unit) {
-                        detectTransformGestures { centroid, pan, zoom, _ ->
+                        detectTransformGestures { _, pan, _, _ ->
                             if (!addPinMode && viewportSize.width > 0) {
-                                val oldScale = scale
-                                val newScale = (scale * zoom).coerceIn(MIN_MAP_ZOOM, MAX_MAP_ZOOM)
-                                val actualZoom = newScale / oldScale
-
-                                val cx = viewportSize.width / 2f
-                                val cy = viewportSize.height / 2f
-
-                                scale = newScale
-                                var nextX = offsetX + pan.x + (centroid.x - cx - offsetX) * (1 - actualZoom)
-                                var nextY = offsetY + pan.y + (centroid.y - cy - offsetY) * (1 - actualZoom)
-
+                                zoomJob?.cancel() // Cancel any ongoing zoom animation immediately on drag
                                 val effectiveW = if (!isEcoMode) tableWidth else baseMapWidth
                                 val effectiveH = if (!isEcoMode) tableHeight else baseMapHeight
-                                val maxPanX = (viewportSize.width / 2f) + (effectiveW * newScale / 2f) - 100f
-                                val maxPanY = (viewportSize.height / 2f) + (effectiveH * newScale / 2f) - 100f
+                                val maxPanX = (viewportSize.width / 2f) + (effectiveW * scale / 2f) - 100f
+                                val maxPanY = (viewportSize.height / 2f) + (effectiveH * scale / 2f) - 100f
+
+                                var nextX = offsetX + pan.x
+                                var nextY = offsetY + pan.y
                                 if (maxPanX > 0) nextX = nextX.coerceIn(-maxPanX, maxPanX)
                                 if (maxPanY > 0) nextY = nextY.coerceIn(-maxPanY, maxPanY)
 
                                 offsetX = nextX
                                 offsetY = nextY
+                                targetScale = scale
+                                targetOffsetX = offsetX
+                                targetOffsetY = offsetY
                             }
                         }
                     }
@@ -254,29 +243,55 @@ fun MapViewer(
                                 val event = awaitPointerEvent()
                                 if (event.type == androidx.compose.ui.input.pointer.PointerEventType.Scroll) {
                                     if (!addPinMode && viewportSize.width > 0) {
-                                        // Extract the cursor location to use as the focal point
                                         val cursorPosition = event.changes.first().position
-                                        val delta = event.changes.first().scrollDelta.y
+                                        val rawDelta = event.changes.first().scrollDelta.y
 
-                                        val oldScale = scale
-                                        val newScale = (scale * if (delta > 0) 0.9f else 1.1f).coerceIn(MIN_MAP_ZOOM, MAX_MAP_ZOOM)
-                                        val actualZoom = newScale / oldScale
+                                        // If reversing direction mid-flight, reset target to current visible values
+                                        if ((rawDelta > 0 && targetScale > scale) || (rawDelta < 0 && targetScale < scale)) {
+                                            targetScale = scale
+                                            targetOffsetX = offsetX
+                                            targetOffsetY = offsetY
+                                        }
 
-                                        val cx = viewportSize.width / 2f
-                                        val cy = viewportSize.height / 2f
+                                        val absDelta = kotlin.math.abs(rawDelta).coerceIn(0.5f, 5f)
+                                        val factor = if (rawDelta > 0) (1f / 1.18f).pow(absDelta) else 1.18f.pow(absDelta)
+                                        val oldTarget = targetScale
+                                        val newTarget = (targetScale * factor).coerceIn(MIN_MAP_ZOOM, MAX_MAP_ZOOM)
 
-                                        scale = newScale
-                                        var nextX = offsetX + (cursorPosition.x - cx - offsetX) * (1 - actualZoom)
-                                        var nextY = offsetY + (cursorPosition.y - cy - offsetY) * (1 - actualZoom)
+                                        if (newTarget != oldTarget) {
+                                            val actualZoom = newTarget / oldTarget
+                                            val cx = viewportSize.width / 2f
+                                            val cy = viewportSize.height / 2f
+                                            var newTargetX = targetOffsetX + (cursorPosition.x - cx - targetOffsetX) * (1 - actualZoom)
+                                            var newTargetY = targetOffsetY + (cursorPosition.y - cy - targetOffsetY) * (1 - actualZoom)
 
-                                        val maxPanX = (viewportSize.width / 2f) + (tableWidth * newScale / 2f) - 100f
-                                        val maxPanY = (viewportSize.height / 2f) + (tableHeight * newScale / 2f) - 100f
-                                        if (maxPanX > 0) nextX = nextX.coerceIn(-maxPanX, maxPanX)
-                                        if (maxPanY > 0) nextY = nextY.coerceIn(-maxPanY, maxPanY)
+                                            val effectiveW = if (!isEcoMode) tableWidth else baseMapWidth
+                                            val effectiveH = if (!isEcoMode) tableHeight else baseMapHeight
+                                            val maxPanX = (viewportSize.width / 2f) + (effectiveW * newTarget / 2f) - 100f
+                                            val maxPanY = (viewportSize.height / 2f) + (effectiveH * newTarget / 2f) - 100f
+                                            if (maxPanX > 0) newTargetX = newTargetX.coerceIn(-maxPanX, maxPanX)
+                                            if (maxPanY > 0) newTargetY = newTargetY.coerceIn(-maxPanY, maxPanY)
 
-                                        offsetX = nextX
-                                        offsetY = nextY
+                                            targetScale = newTarget
+                                            targetOffsetX = newTargetX
+                                            targetOffsetY = newTargetY
 
+                                            zoomJob?.cancel()
+                                            zoomJob = coroutineScope.launch {
+                                                val startScale = scale
+                                                val startX = offsetX
+                                                val startY = offsetY
+                                                val anim = Animatable(0f)
+                                                anim.animateTo(
+                                                    targetValue = 1f,
+                                                    animationSpec = tween(durationMillis = 140, easing = FastOutSlowInEasing)
+                                                ) {
+                                                    scale = startScale + (targetScale - startScale) * value
+                                                    offsetX = startX + (targetOffsetX - startX) * value
+                                                    offsetY = startY + (targetOffsetY - startY) * value
+                                                }
+                                            }
+                                        }
                                         event.changes.forEach { it.consume() }
                                     }
                                 }
@@ -289,10 +304,10 @@ fun MapViewer(
                     modifier = Modifier
                         .align(Alignment.Center)
                         .graphicsLayer(
-                            scaleX = animatedScale.value,
-                            scaleY = animatedScale.value,
-                            translationX = animatedOffsetX.value,
-                            translationY = animatedOffsetY.value
+                            scaleX = scale,
+                            scaleY = scale,
+                            translationX = offsetX,
+                            translationY = offsetY
                         )
                         .size(
                             if (!isEcoMode) tableWidthDp else baseMapWidthDp,
@@ -409,6 +424,9 @@ fun MapViewer(
                             try { markerColor = Color(marker.colorULong.toULong()) } catch(e: Exception) {}
                         }
                         
+                        // Adaptive scale multiplier: gently dampens pin scaling (~18.5dp at min zoom to ~31.2dp at max zoom)
+                        val markerAdaptiveScale = (scale.pow(-0.85f)).coerceIn(0.02f, 2.0f)
+
                         Box(
                             modifier = Modifier
                                 .offset(
@@ -416,6 +434,10 @@ fun MapViewer(
                                     y = with(androidx.compose.ui.platform.LocalDensity.current) { pxY.toDp() } - 12.dp
                                 )
                                 .size(24.dp)
+                                .graphicsLayer {
+                                    scaleX = markerAdaptiveScale
+                                    scaleY = markerAdaptiveScale
+                                }
                                 .pointerInput(marker) {
                                     awaitPointerEventScope {
                                         while (true) {
@@ -556,20 +578,64 @@ fun MapViewer(
         ) {
             Row(modifier = Modifier.padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = {
-                    val oldScale = scale
-                    val newScale = (scale * 1.2f).coerceIn(MIN_MAP_ZOOM, MAX_MAP_ZOOM)
-                    val actualZoom = newScale / oldScale
-                    scale = newScale
-                    offsetX *= actualZoom
-                    offsetY *= actualZoom
+                    val factor = 1.25f
+                    val oldTarget = targetScale
+                    val newTarget = (targetScale * factor).coerceIn(MIN_MAP_ZOOM, MAX_MAP_ZOOM)
+                    if (newTarget != oldTarget) {
+                        val actualZoom = newTarget / oldTarget
+                        val newTargetX = targetOffsetX * actualZoom
+                        val newTargetY = targetOffsetY * actualZoom
+
+                        targetScale = newTarget
+                        targetOffsetX = newTargetX
+                        targetOffsetY = newTargetY
+
+                        zoomJob?.cancel()
+                        zoomJob = coroutineScope.launch {
+                            val startScale = scale
+                            val startX = offsetX
+                            val startY = offsetY
+                            val anim = Animatable(0f)
+                            anim.animateTo(
+                                targetValue = 1f,
+                                animationSpec = tween(durationMillis = 140, easing = FastOutSlowInEasing)
+                            ) {
+                                scale = startScale + (targetScale - startScale) * value
+                                offsetX = startX + (targetOffsetX - startX) * value
+                                offsetY = startY + (targetOffsetY - startY) * value
+                            }
+                        }
+                    }
                 }) { Text("+") }
                 Button(onClick = {
-                    val oldScale = scale
-                    val newScale = (scale / 1.2f).coerceIn(MIN_MAP_ZOOM, MAX_MAP_ZOOM)
-                    val actualZoom = newScale / oldScale
-                    scale = newScale
-                    offsetX *= actualZoom
-                    offsetY *= actualZoom
+                    val factor = 0.80f
+                    val oldTarget = targetScale
+                    val newTarget = (targetScale * factor).coerceIn(MIN_MAP_ZOOM, MAX_MAP_ZOOM)
+                    if (newTarget != oldTarget) {
+                        val actualZoom = newTarget / oldTarget
+                        val newTargetX = targetOffsetX * actualZoom
+                        val newTargetY = targetOffsetY * actualZoom
+
+                        targetScale = newTarget
+                        targetOffsetX = newTargetX
+                        targetOffsetY = newTargetY
+
+                        zoomJob?.cancel()
+                        zoomJob = coroutineScope.launch {
+                            val startScale = scale
+                            val startX = offsetX
+                            val startY = offsetY
+                            val anim = Animatable(0f)
+                            anim.animateTo(
+                                targetValue = 1f,
+                                animationSpec = tween(durationMillis = 140, easing = FastOutSlowInEasing)
+                            ) {
+                                scale = startScale + (targetScale - startScale) * value
+                                offsetX = startX + (targetOffsetX - startX) * value
+                                offsetY = startY + (targetOffsetY - startY) * value
+                            }
+                        }
+                    }
                 }) { Text("-") }
                 Button(onClick = { addPinMode = !addPinMode }, colors = ButtonDefaults.buttonColors(containerColor = if (addPinMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary)) {
                     Text(if (addPinMode) "Click Map to Place" else "Add Pin")

@@ -21,6 +21,13 @@ import androidx.compose.ui.res.loadImageBitmap
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
+import kotlin.math.pow
+import kotlin.math.abs
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -31,6 +38,9 @@ import javax.imageio.ImageIO
  * Interactive image viewer supporting zoom (mouse wheel + buttons), pan/drag,
  * fit-to-screen, 1:1 original size, and file information.
  */
+private const val MIN_IMAGE_ZOOM = 0.05f
+private const val MAX_IMAGE_ZOOM = 50.0f
+
 @Composable
 fun ImageViewer(
     filePath: String,
@@ -46,8 +56,13 @@ fun ImageViewer(
     var scale by remember { mutableStateOf(1f) }
     var offsetX by remember { mutableStateOf(0f) }
     var offsetY by remember { mutableStateOf(0f) }
+    var targetScale by remember { mutableStateOf(1f) }
+    var targetOffsetX by remember { mutableStateOf(0f) }
+    var targetOffsetY by remember { mutableStateOf(0f) }
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
     var hasAutoFitted by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+    var zoomJob by remember { mutableStateOf<Job?>(null) }
 
     LaunchedEffect(filePath, reloadTrigger) {
         isLoading = true
@@ -95,7 +110,7 @@ fun ImageViewer(
         }
     }
 
-    fun fitToScreen(bitmap: ImageBitmap, viewSize: IntSize) {
+    fun fitToScreen(bitmap: ImageBitmap, viewSize: IntSize, animate: Boolean = false) {
         if (viewSize.width <= 0 || viewSize.height <= 0) return
         val padding = 48f
         val availW = (viewSize.width - padding).coerceAtLeast(20f)
@@ -103,10 +118,28 @@ fun ImageViewer(
         val scaleW = availW / bitmap.width
         val scaleH = availH / bitmap.height
         val fitScale = minOf(scaleW, scaleH)
-        // If image is smaller than viewport, keep 1.0f scale, otherwise scale down to fit
-        scale = if (bitmap.width <= availW && bitmap.height <= availH) 1f else fitScale.coerceIn(0.05f, 25f)
-        offsetX = 0f
-        offsetY = 0f
+        val target = if (bitmap.width <= availW && bitmap.height <= availH) 1f else fitScale.coerceIn(MIN_IMAGE_ZOOM, MAX_IMAGE_ZOOM)
+        targetScale = target
+        targetOffsetX = 0f
+        targetOffsetY = 0f
+        if (animate) {
+            zoomJob?.cancel()
+            zoomJob = coroutineScope.launch {
+                val startScale = scale
+                val startX = offsetX
+                val startY = offsetY
+                val anim = Animatable(0f)
+                anim.animateTo(1f, tween(140, easing = FastOutSlowInEasing)) {
+                    scale = startScale + (targetScale - startScale) * value
+                    offsetX = startX + (0f - startX) * value
+                    offsetY = startY + (0f - startY) * value
+                }
+            }
+        } else {
+            scale = target
+            offsetX = 0f
+            offsetY = 0f
+        }
     }
 
     // Auto-fit on first load once viewport size and bitmap are available
@@ -161,7 +194,29 @@ fun ImageViewer(
                         // Zoom Out
                         OutlinedButton(
                             onClick = {
-                                scale = (scale / 1.25f).coerceIn(0.05f, 25f)
+                                val factor = 0.80f
+                                val oldTarget = targetScale
+                                val newTarget = (targetScale * factor).coerceIn(MIN_IMAGE_ZOOM, MAX_IMAGE_ZOOM)
+                                if (newTarget != oldTarget) {
+                                    val actualZoom = newTarget / oldTarget
+                                    val newTargetX = targetOffsetX * actualZoom
+                                    val newTargetY = targetOffsetY * actualZoom
+                                    targetScale = newTarget
+                                    targetOffsetX = newTargetX
+                                    targetOffsetY = newTargetY
+                                    zoomJob?.cancel()
+                                    zoomJob = coroutineScope.launch {
+                                        val startScale = scale
+                                        val startX = offsetX
+                                        val startY = offsetY
+                                        val anim = Animatable(0f)
+                                        anim.animateTo(1f, tween(140, easing = FastOutSlowInEasing)) {
+                                            scale = startScale + (targetScale - startScale) * value
+                                            offsetX = startX + (targetOffsetX - startX) * value
+                                            offsetY = startY + (targetOffsetY - startY) * value
+                                        }
+                                    }
+                                }
                             },
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                             modifier = Modifier.height(30.dp)
@@ -169,12 +224,24 @@ fun ImageViewer(
                             Text("-", fontSize = 16.sp)
                         }
 
-                        // Zoom percent
+                        // Zoom percent (Click to reset 1:1)
                         TextButton(
                             onClick = {
-                                scale = 1f
-                                offsetX = 0f
-                                offsetY = 0f
+                                targetScale = 1f
+                                targetOffsetX = 0f
+                                targetOffsetY = 0f
+                                zoomJob?.cancel()
+                                zoomJob = coroutineScope.launch {
+                                    val startScale = scale
+                                    val startX = offsetX
+                                    val startY = offsetY
+                                    val anim = Animatable(0f)
+                                    anim.animateTo(1f, tween(140, easing = FastOutSlowInEasing)) {
+                                        scale = startScale + (1f - startScale) * value
+                                        offsetX = startX + (0f - startX) * value
+                                        offsetY = startY + (0f - startY) * value
+                                    }
+                                }
                             },
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                             modifier = Modifier.height(30.dp)
@@ -185,7 +252,29 @@ fun ImageViewer(
                         // Zoom In
                         OutlinedButton(
                             onClick = {
-                                scale = (scale * 1.25f).coerceIn(0.05f, 25f)
+                                val factor = 1.25f
+                                val oldTarget = targetScale
+                                val newTarget = (targetScale * factor).coerceIn(MIN_IMAGE_ZOOM, MAX_IMAGE_ZOOM)
+                                if (newTarget != oldTarget) {
+                                    val actualZoom = newTarget / oldTarget
+                                    val newTargetX = targetOffsetX * actualZoom
+                                    val newTargetY = targetOffsetY * actualZoom
+                                    targetScale = newTarget
+                                    targetOffsetX = newTargetX
+                                    targetOffsetY = newTargetY
+                                    zoomJob?.cancel()
+                                    zoomJob = coroutineScope.launch {
+                                        val startScale = scale
+                                        val startX = offsetX
+                                        val startY = offsetY
+                                        val anim = Animatable(0f)
+                                        anim.animateTo(1f, tween(140, easing = FastOutSlowInEasing)) {
+                                            scale = startScale + (targetScale - startScale) * value
+                                            offsetX = startX + (targetOffsetX - startX) * value
+                                            offsetY = startY + (targetOffsetY - startY) * value
+                                        }
+                                    }
+                                }
                             },
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                             modifier = Modifier.height(30.dp)
@@ -198,9 +287,21 @@ fun ImageViewer(
                         // 1:1 original
                         OutlinedButton(
                             onClick = {
-                                scale = 1f
-                                offsetX = 0f
-                                offsetY = 0f
+                                targetScale = 1f
+                                targetOffsetX = 0f
+                                targetOffsetY = 0f
+                                zoomJob?.cancel()
+                                zoomJob = coroutineScope.launch {
+                                    val startScale = scale
+                                    val startX = offsetX
+                                    val startY = offsetY
+                                    val anim = Animatable(0f)
+                                    anim.animateTo(1f, tween(140, easing = FastOutSlowInEasing)) {
+                                        scale = startScale + (1f - startScale) * value
+                                        offsetX = startX + (0f - startX) * value
+                                        offsetY = startY + (0f - startY) * value
+                                    }
+                                }
                             },
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                             modifier = Modifier.height(30.dp)
@@ -211,7 +312,7 @@ fun ImageViewer(
                         // Fit to screen
                         OutlinedButton(
                             onClick = {
-                                imageBitmap?.let { fitToScreen(it, viewportSize) }
+                                imageBitmap?.let { fitToScreen(it, viewportSize, animate = true) }
                             },
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                             modifier = Modifier.height(30.dp)
@@ -223,8 +324,18 @@ fun ImageViewer(
                             // Center position
                             OutlinedButton(
                                 onClick = {
-                                    offsetX = 0f
-                                    offsetY = 0f
+                                    targetOffsetX = 0f
+                                    targetOffsetY = 0f
+                                    zoomJob?.cancel()
+                                    zoomJob = coroutineScope.launch {
+                                        val startX = offsetX
+                                        val startY = offsetY
+                                        val anim = Animatable(0f)
+                                        anim.animateTo(1f, tween(140, easing = FastOutSlowInEasing)) {
+                                            offsetX = startX + (0f - startX) * value
+                                            offsetY = startY + (0f - startY) * value
+                                        }
+                                    }
                                 },
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                                 modifier = Modifier.height(30.dp)
@@ -280,18 +391,14 @@ fun ImageViewer(
                         modifier = Modifier
                             .fillMaxSize()
                             .pointerInput(Unit) {
-                                detectTransformGestures { centroid, pan, zoom, _ ->
+                                detectTransformGestures { _, pan, _, _ ->
                                     if (viewportSize.width > 0) {
-                                        val oldScale = scale
-                                        val newScale = (scale * zoom).coerceIn(0.05f, 25f)
-                                        val actualZoom = newScale / oldScale
-
-                                        val cx = viewportSize.width / 2f
-                                        val cy = viewportSize.height / 2f
-
-                                        scale = newScale
-                                        offsetX = offsetX + pan.x + (centroid.x - cx - offsetX) * (1 - actualZoom)
-                                        offsetY = offsetY + pan.y + (centroid.y - cy - offsetY) * (1 - actualZoom)
+                                        zoomJob?.cancel() // Cancel ongoing zoom animation immediately on drag
+                                        offsetX += pan.x
+                                        offsetY += pan.y
+                                        targetScale = scale
+                                        targetOffsetX = offsetX
+                                        targetOffsetY = offsetY
                                     }
                                 }
                             }
@@ -300,20 +407,45 @@ fun ImageViewer(
                                     while (true) {
                                         val event = awaitPointerEvent()
                                         if (event.type == PointerEventType.Scroll && viewportSize.width > 0) {
-                                            val delta = event.changes.first().scrollDelta.y
                                             val cursorPosition = event.changes.first().position
-                                            val factor = if (delta > 0) 0.85f else 1.15f
-                                            val oldScale = scale
-                                            val newScale = (scale * factor).coerceIn(0.05f, 25f)
-                                            val actualZoom = newScale / oldScale
+                                            val rawDelta = event.changes.first().scrollDelta.y
 
-                                            val cx = viewportSize.width / 2f
-                                            val cy = viewportSize.height / 2f
+                                            // If reversing direction mid-flight, reset target to current visible values
+                                            if ((rawDelta > 0 && targetScale > scale) || (rawDelta < 0 && targetScale < scale)) {
+                                                targetScale = scale
+                                                targetOffsetX = offsetX
+                                                targetOffsetY = offsetY
+                                            }
 
-                                            scale = newScale
-                                            offsetX = offsetX + (cursorPosition.x - cx - offsetX) * (1 - actualZoom)
-                                            offsetY = offsetY + (cursorPosition.y - cy - offsetY) * (1 - actualZoom)
+                                            val absDelta = kotlin.math.abs(rawDelta).coerceIn(0.5f, 5f)
+                                            val factor = if (rawDelta > 0) (1f / 1.18f).pow(absDelta) else 1.18f.pow(absDelta)
+                                            val oldTarget = targetScale
+                                            val newTarget = (targetScale * factor).coerceIn(MIN_IMAGE_ZOOM, MAX_IMAGE_ZOOM)
 
+                                            if (newTarget != oldTarget) {
+                                                val actualZoom = newTarget / oldTarget
+                                                val cx = viewportSize.width / 2f
+                                                val cy = viewportSize.height / 2f
+                                                val newTargetX = targetOffsetX + (cursorPosition.x - cx - targetOffsetX) * (1 - actualZoom)
+                                                val newTargetY = targetOffsetY + (cursorPosition.y - cy - targetOffsetY) * (1 - actualZoom)
+
+                                                targetScale = newTarget
+                                                targetOffsetX = newTargetX
+                                                targetOffsetY = newTargetY
+
+                                                zoomJob?.cancel()
+                                                zoomJob = coroutineScope.launch {
+                                                    val startScale = scale
+                                                    val startX = offsetX
+                                                    val startY = offsetY
+                                                    val anim = Animatable(0f)
+                                                    anim.animateTo(1f, tween(140, easing = FastOutSlowInEasing)) {
+                                                        scale = startScale + (targetScale - startScale) * value
+                                                        offsetX = startX + (targetOffsetX - startX) * value
+                                                        offsetY = startY + (targetOffsetY - startY) * value
+                                                    }
+                                                }
+                                            }
                                             event.changes.forEach { it.consume() }
                                         }
                                     }
