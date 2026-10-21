@@ -1,6 +1,9 @@
 package de.luca.dungeon_master_manager.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -11,15 +14,21 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import de.luca.dungeon_master_manager.data.ProjectInfo
-import de.luca.dungeon_master_manager.ui.theme.GrimoireCard
-import de.luca.dungeon_master_manager.ui.theme.GrimoireColors
-import de.luca.dungeon_master_manager.ui.theme.GrimoireDivider
+import de.luca.dungeon_master_manager.data.AppSettingsRepository
+import de.luca.dungeon_master_manager.ui.theme.*
 import de.luca.dungeon_master_manager.viewmodel.EntityViewModel
 import de.luca.dungeon_master_manager.viewmodel.ProjectLauncherViewModel
+import dungeon_master_manager.shared.generated.resources.*
+import org.jetbrains.compose.resources.imageResource
+import org.jetbrains.compose.resources.painterResource
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -36,133 +45,193 @@ fun ProjectLauncherScreen(
     
     val entityViewModel = remember { EntityViewModel(null, null) }
     var showGlobalEntityDialog by remember { mutableStateOf(false) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
 
-    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 40.dp, vertical = 32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            // Top bar with title + global entities button
-            Row(
-                modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+    val appSettings by AppSettingsRepository.settings.collectAsState()
+
+    if (!appSettings.isBatterySaverMode) {
+        // FULL WAR ROOM ATMOSPHERE MODE
+        GrimoireAmbientChamber(modifier = Modifier.fillMaxSize()) {
+            BoxWithConstraints(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 24.dp, vertical = 20.dp),
+                contentAlignment = Alignment.Center
             ) {
-                Column {
-                    Text(
-                        "Dungeon Master Manager",
-                        style = MaterialTheme.typography.displaySmall,
-                        color = GrimoireColors.GoldPrimary,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "Select a campaign or create a new chronicle",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = GrimoireColors.ParchmentMuted,
-                    )
-                }
+                val tableWidth = minOf(maxWidth, 1260.dp)
+                val tableHeight = minOf(maxHeight, 820.dp)
 
-                OutlinedButton(
-                    onClick = { showGlobalEntityDialog = true },
-                    border = BorderStroke(1.dp, GrimoireColors.BorderBronze),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = GrimoireColors.GoldPrimary
-                    ),
-                    shape = RoundedCornerShape(6.dp)
+                // Grand War Table on the chamber floor
+                Box(
+                    modifier = Modifier.size(tableWidth, tableHeight)
                 ) {
-                    Text("Global Entities")
-                }
-            }
+                    // 0. Fur Pelt Rug on stone floor peeking out from under bottom-left of table
+                    TabletopFurPelt(
+                        tableWidth = tableWidth,
+                        tableHeight = tableHeight
+                    )
 
-            Spacer(Modifier.height(20.dp))
-            GrimoireDivider(
-                modifier = Modifier.widthIn(max = 760.dp),
-                showDiamond = true,
-                color = GrimoireColors.BorderBronze
-            )
-            Spacer(Modifier.height(24.dp))
+                    // 1. Realistic Deep Table Drop Shadow
+                    RealisticTableDropShadow(
+                        shape = RoundedCornerShape(14.dp)
+                    )
 
-            // Error banner
-            error?.let { errorMessage ->
-                Card(
-                    modifier = Modifier.widthIn(max = 760.dp).fillMaxWidth().padding(bottom = 16.dp),
-                    shape = RoundedCornerShape(6.dp),
-                    border = BorderStroke(1.dp, GrimoireColors.CrimsonError),
-                    colors = CardDefaults.cardColors(
-                        containerColor = GrimoireColors.ErrorContainer,
-                    ),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                    // 2. Grand War Table Surface (Cropped pure wood & carved border)
+                    Image(
+                        painter = painterResource(Res.drawable.tabletop_hero),
+                        contentDescription = "Grand War Table",
+                        contentScale = ContentScale.FillBounds,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(14.dp))
+                    )
+
+                    // 3. Tabletop Props on the wood desk around the book:
+                    val quillBitmap = imageResource(Res.drawable.prop_quill)
+                    Image(
+                        bitmap = quillBitmap,
+                        contentDescription = "Quill and Ink",
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .offset(x = 12.dp, y = (-20).dp)
+                            .requiredSize(140.dp, 140.dp)
+                            .graphicsLayer {
+                                rotationZ = -16f
+                                alpha = 0.94f
+                            }
+                    )
+
+                    val diceBitmap = imageResource(Res.drawable.prop_dice)
+                    Image(
+                        bitmap = diceBitmap,
+                        contentDescription = "RPG Dice",
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .offset(x = (-28).dp, y = (-36).dp)
+                            .requiredSize(130.dp, 74.dp)
+                            .graphicsLayer {
+                                rotationZ = 14f
+                                alpha = 0.94f
+                            }
+                    )
+
+                    val coinsBitmap = imageResource(Res.drawable.prop_coins)
+                    Image(
+                        bitmap = coinsBitmap,
+                        contentDescription = "Coins",
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .offset(x = (-36).dp, y = 44.dp)
+                            .requiredSize(105.dp, 105.dp)
+                            .graphicsLayer {
+                                rotationZ = 20f
+                                alpha = 0.94f
+                            }
+                    )
+
+                    val sealBitmap = imageResource(Res.drawable.prop_seal)
+                    Image(
+                        bitmap = sealBitmap,
+                        contentDescription = "Wax Seal",
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .offset(x = 44.dp, y = (-36).dp)
+                            .requiredSize(72.dp, 78.dp)
+                            .graphicsLayer {
+                                rotationZ = -8f
+                                alpha = 0.96f
+                            }
+                    )
+
+                    // 4. Centered Campaign Tome Folio
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .widthIn(min = 340.dp, max = 780.dp)
+                            .fillMaxWidth(0.72f)
+                            .fillMaxHeight(0.90f)
+                            .graphicsLayer {
+                                shadowElevation = 18.dp.toPx()
+                                shape = RoundedCornerShape(10.dp)
+                            }
+                            .background(
+                                color = GrimoireColors.SurfaceCard,
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            .border(
+                                width = 1.5.dp,
+                                brush = Brush.linearGradient(
+                                    listOf(GrimoireColors.BorderBronze, GrimoireColors.GoldMuted, GrimoireColors.BorderBronze)
+                                ),
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            .tiledTexture(
+                                resource = Res.drawable.grimoire_vellum,
+                                alpha = 0.35f
+                            )
+                            .padding(horizontal = 36.dp, vertical = 24.dp)
                     ) {
-                        Text(
-                            errorMessage,
-                            modifier = Modifier.weight(1f),
-                            color = GrimoireColors.OnErrorContainer,
-                        )
-                        TextButton(onClick = { viewModel.clearError() }) {
-                            Text("Dismiss", color = GrimoireColors.OnErrorContainer)
-                        }
-                    }
-                }
-            }
-
-            if (isLoading) {
-                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = GrimoireColors.GoldPrimary)
-                }
-            } else if (projects.isEmpty()) {
-                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            "No campaigns yet",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = GrimoireColors.ParchmentLight,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            "Create your first campaign to begin your adventure",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = GrimoireColors.ParchmentMuted,
-                        )
-                    }
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.weight(1f).widthIn(max = 760.dp).fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    items(projects, key = { it.path }) { project ->
-                        ProjectCard(
-                            project = project,
-                            onClick = { onProjectSelected(project) },
-                            onDelete = { projectToDelete = project },
+                        LauncherFolioContent(
+                            projects = projects,
+                            isLoading = isLoading,
+                            error = error,
+                            onClearError = { viewModel.clearError() },
+                            onProjectSelected = onProjectSelected,
+                            onDeleteProject = { projectToDelete = it },
+                            onOpenGlobalEntities = { showGlobalEntityDialog = true },
+                            onOpenSettings = { showSettingsDialog = true },
+                            onCreateProject = { showCreateDialog = true }
                         )
                     }
                 }
             }
-
-            Spacer(Modifier.height(20.dp))
-            Button(
-                onClick = { showCreateDialog = true },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = GrimoireColors.GoldPrimary,
-                    contentColor = GrimoireColors.Background
-                ),
-                shape = RoundedCornerShape(6.dp),
-                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp)
+        }
+    } else {
+        // BATTERY SAVER / PERFORMANCE MODE (Ultra-clean solid surface, no textures or shadows)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(GrimoireColors.Background)
+                .padding(horizontal = 24.dp, vertical = 20.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .widthIn(min = 420.dp, max = 880.dp)
+                    .fillMaxWidth(0.82f)
+                    .fillMaxHeight(0.92f)
+                    .background(
+                        color = GrimoireColors.SurfaceCard,
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = GrimoireColors.BorderBronze,
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                    .padding(horizontal = 36.dp, vertical = 24.dp)
             ) {
-                Text(
-                    "+ New Campaign",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold
+                LauncherFolioContent(
+                    projects = projects,
+                    isLoading = isLoading,
+                    error = error,
+                    onClearError = { viewModel.clearError() },
+                    onProjectSelected = onProjectSelected,
+                    onDeleteProject = { projectToDelete = it },
+                    onOpenGlobalEntities = { showGlobalEntityDialog = true },
+                    onOpenSettings = { showSettingsDialog = true },
+                    onCreateProject = { showCreateDialog = true }
                 )
             }
         }
     }
 
-    // Create Dialog
+    // Settings Dialog
+    if (showSettingsDialog) {
+        SettingsDialog(onDismiss = { showSettingsDialog = false })
+    }
+
+// Create Dialog
     if (showCreateDialog) {
         CreateProjectDialog(
             onDismiss = { showCreateDialog = false },
@@ -225,7 +294,7 @@ private fun ProjectCard(
 ) {
     val dateFormat = remember { SimpleDateFormat("dd MMM yyyy", Locale.getDefault()) }
 
-    GrimoireCard(
+    GrimoireFolioCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
         onClick = onClick,
@@ -350,3 +419,164 @@ private fun CreateProjectDialog(
         },
     )
 }
+
+@Composable
+private fun LauncherFolioContent(
+    projects: List<ProjectInfo>,
+    isLoading: Boolean,
+    error: String?,
+    onClearError: () -> Unit,
+    onProjectSelected: (ProjectInfo) -> Unit,
+    onDeleteProject: (ProjectInfo) -> Unit,
+    onOpenGlobalEntities: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onCreateProject: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        // Top bar with title + action buttons (Spacious and responsive)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f, fill = false).padding(end = 16.dp)
+            ) {
+                Text(
+                    "Dungeon Master Manager",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = GrimoireColors.GoldPrimary,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Select a campaign or create a new chronicle",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = GrimoireColors.ParchmentMuted,
+                    maxLines = 1
+                )
+            }
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedButton(
+                    onClick = onOpenGlobalEntities,
+                    border = BorderStroke(1.dp, GrimoireColors.BorderBronze),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = GrimoireColors.GoldPrimary
+                    ),
+                    shape = RoundedCornerShape(6.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                ) {
+                    Text("Global Entities", maxLines = 1, softWrap = false)
+                }
+
+                OutlinedButton(
+                    onClick = onOpenSettings,
+                    border = BorderStroke(1.dp, GrimoireColors.BorderBronze),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = GrimoireColors.GoldPrimary
+                    ),
+                    shape = RoundedCornerShape(6.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                ) {
+                    Text("Settings", maxLines = 1, softWrap = false)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        GrimoireDivider(
+            modifier = Modifier.fillMaxWidth(),
+            showDiamond = true,
+            color = GrimoireColors.BorderBronze
+        )
+        Spacer(Modifier.height(18.dp))
+
+        // Error banner
+        error?.let { errorMessage ->
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                shape = RoundedCornerShape(6.dp),
+                border = BorderStroke(1.dp, GrimoireColors.CrimsonError),
+                colors = CardDefaults.cardColors(
+                    containerColor = GrimoireColors.ErrorContainer,
+                ),
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        errorMessage,
+                        modifier = Modifier.weight(1f),
+                        color = GrimoireColors.OnErrorContainer,
+                    )
+                    TextButton(onClick = onClearError) {
+                        Text("Dismiss", color = GrimoireColors.OnErrorContainer)
+                    }
+                }
+            }
+        }
+
+        if (isLoading) {
+            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = GrimoireColors.GoldPrimary)
+            }
+        } else if (projects.isEmpty()) {
+            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        "No campaigns yet",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = GrimoireColors.ParchmentLight,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Create your first campaign to begin your adventure",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = GrimoireColors.ParchmentMuted,
+                    )
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                items(projects, key = { it.path }) { project ->
+                    ProjectCard(
+                        project = project,
+                        onClick = { onProjectSelected(project) },
+                        onDelete = { onDeleteProject(project) },
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Button(
+            onClick = onCreateProject,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = GrimoireColors.GoldPrimary,
+                contentColor = GrimoireColors.Background
+            ),
+            shape = RoundedCornerShape(6.dp),
+            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp)
+        ) {
+            Text(
+                "+ New Campaign",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+

@@ -35,6 +35,10 @@ import androidx.compose.ui.unit.sp
 import de.luca.dungeon_master_manager.ui.theme.GrimoireColors
 import de.luca.dungeon_master_manager.ui.theme.GrimoireDivider
 import de.luca.dungeon_master_manager.ui.theme.LocalFantasyFontFamily
+import de.luca.dungeon_master_manager.ui.theme.GrimoireVellumTomePage
+import de.luca.dungeon_master_manager.ui.theme.tiledTexture
+import dungeon_master_manager.shared.generated.resources.Res
+import dungeon_master_manager.shared.generated.resources.grimoire_vellum
 import de.luca.dungeonmastermanager.database.Entity
 
 @Composable
@@ -310,6 +314,7 @@ private fun MarkdownEdit(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .tiledTexture(Res.drawable.grimoire_vellum, alpha = 0.08f)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
@@ -444,14 +449,16 @@ private fun MarkdownPreview(content: String, entities: List<Entity>, onOpenEntit
         builder.toAnnotatedString()
     }
 
-    Text(
-        text = finalAnnotatedString,
-        style = TextStyle(
-            color = GrimoireColors.ParchmentLight,
-            fontSize = 16.sp,
-            lineHeight = 24.sp
+    GrimoireVellumTomePage {
+        Text(
+            text = finalAnnotatedString,
+            style = TextStyle(
+                color = GrimoireColors.ParchmentLight,
+                fontSize = 16.sp,
+                lineHeight = 26.sp
+            )
         )
-    )
+    }
 }
 
 private fun parseMarkdown(

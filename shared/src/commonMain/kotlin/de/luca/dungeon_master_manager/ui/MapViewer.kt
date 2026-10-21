@@ -29,12 +29,37 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.res.loadImageBitmap
 import androidx.compose.ui.unit.dp
 import de.luca.dungeon_master_manager.colorElement
+import de.luca.dungeon_master_manager.ui.theme.GrimoireColors
+import de.luca.dungeon_master_manager.data.AppSettingsRepository
+import de.luca.dungeon_master_manager.ui.theme.GrimoireDeskSurface
+import de.luca.dungeon_master_manager.ui.theme.GrimoireAmbientChamber
+import dungeon_master_manager.shared.generated.resources.Res
+import dungeon_master_manager.shared.generated.resources.tabletop_hero
+import org.jetbrains.compose.resources.painterResource
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.border
+import de.luca.dungeon_master_manager.ui.theme.TabletopPropsDeskLayer
+import de.luca.dungeon_master_manager.ui.theme.TabletopPropsMapAccentsLayer
+import de.luca.dungeon_master_manager.ui.theme.RealisticTableDropShadow
+import de.luca.dungeon_master_manager.ui.theme.TabletopFurPelt
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.drawWithContent
+import de.luca.dungeon_master_manager.ui.theme.MapBoundaryFogOverlay
+import de.luca.dungeon_master_manager.ui.theme.FogOfWarSurface
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.RoundedCornerShape
 import de.luca.dungeon_master_manager.data.MapData
 import de.luca.dungeon_master_manager.data.MapMarker
 import de.luca.dungeon_master_manager.random
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
+
+private const val MIN_MAP_ZOOM = 0.48f
+private const val MAX_MAP_ZOOM = 5.0f
 
 @Composable
 fun MapViewer(
@@ -148,13 +173,51 @@ fun MapViewer(
     }
 
     var addPinMode by remember { mutableStateOf(false) }
+    val appSettings by AppSettingsRepository.settings.collectAsState()
+    val isEcoMode = appSettings.isBatterySaverMode
 
     var viewportSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
 
     Box(modifier = Modifier.fillMaxSize().clipToBounds().onSizeChanged { viewportSize = it }) {
+        // Ambient background: Full stone chamber in normal mode, clean solid slate in Battery Saver mode
+        if (!isEcoMode) {
+            GrimoireAmbientChamber(
+                modifier = Modifier.fillMaxSize(),
+                panOffset = androidx.compose.ui.geometry.Offset(animatedOffsetX.value, animatedOffsetY.value),
+                zoomScale = animatedScale.value
+            )
+        } else {
+            Box(modifier = Modifier.fillMaxSize().background(GrimoireColors.Background))
+        }
+
         if (imageBitmap != null) {
             var showMarkerDialog by remember { mutableStateOf<MapMarker?>(null) }
-            
+
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            val imgW = imageBitmap!!.width.toFloat()
+            val imgH = imageBitmap!!.height.toFloat()
+
+            // Viewport-normalized base display size for the map:
+            // At zoom = 1.0f, the map occupies ~72% of the viewport dimensions, maintaining its native aspect ratio.
+            val vw = if (viewportSize.width > 0) viewportSize.width.toFloat() else 1920f
+            val vh = if (viewportSize.height > 0) viewportSize.height.toFloat() else 1080f
+            val targetMapW = vw * 0.72f
+            val targetMapH = vh * 0.72f
+            val fitScale = minOf(targetMapW / imgW, targetMapH / imgH)
+            val baseMapWidth = imgW * fitScale
+            val baseMapHeight = imgH * fitScale
+
+            val baseMapWidthDp = with(density) { baseMapWidth.toDp() }
+            val baseMapHeightDp = with(density) { baseMapHeight.toDp() }
+
+            // Grand War Table dimensions: Generously frames the map with ample desk margins
+            val marginX = maxOf(baseMapWidth * 0.30f, with(density) { 180.dp.toPx() })
+            val marginY = maxOf(baseMapHeight * 0.30f, with(density) { 140.dp.toPx() })
+            val tableWidth = baseMapWidth + marginX * 2f
+            val tableHeight = baseMapHeight + marginY * 2f
+            val tableWidthDp = with(density) { tableWidth.toDp() }
+            val tableHeightDp = with(density) { tableHeight.toDp() }
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -163,16 +226,25 @@ fun MapViewer(
                         detectTransformGestures { centroid, pan, zoom, _ ->
                             if (!addPinMode && viewportSize.width > 0) {
                                 val oldScale = scale
-                                val newScale = (scale * zoom).coerceIn(0.1f, 5f)
+                                val newScale = (scale * zoom).coerceIn(MIN_MAP_ZOOM, MAX_MAP_ZOOM)
                                 val actualZoom = newScale / oldScale
 
                                 val cx = viewportSize.width / 2f
                                 val cy = viewportSize.height / 2f
 
                                 scale = newScale
-                                // Pan the map plus compensate for the zoom shifting
-                                offsetX = offsetX + pan.x + (centroid.x - cx - offsetX) * (1 - actualZoom)
-                                offsetY = offsetY + pan.y + (centroid.y - cy - offsetY) * (1 - actualZoom)
+                                var nextX = offsetX + pan.x + (centroid.x - cx - offsetX) * (1 - actualZoom)
+                                var nextY = offsetY + pan.y + (centroid.y - cy - offsetY) * (1 - actualZoom)
+
+                                val effectiveW = if (!isEcoMode) tableWidth else baseMapWidth
+                                val effectiveH = if (!isEcoMode) tableHeight else baseMapHeight
+                                val maxPanX = (viewportSize.width / 2f) + (effectiveW * newScale / 2f) - 100f
+                                val maxPanY = (viewportSize.height / 2f) + (effectiveH * newScale / 2f) - 100f
+                                if (maxPanX > 0) nextX = nextX.coerceIn(-maxPanX, maxPanX)
+                                if (maxPanY > 0) nextY = nextY.coerceIn(-maxPanY, maxPanY)
+
+                                offsetX = nextX
+                                offsetY = nextY
                             }
                         }
                     }
@@ -187,16 +259,23 @@ fun MapViewer(
                                         val delta = event.changes.first().scrollDelta.y
 
                                         val oldScale = scale
-                                        val newScale = (scale * if (delta > 0) 0.9f else 1.1f).coerceIn(0.1f, 5f)
+                                        val newScale = (scale * if (delta > 0) 0.9f else 1.1f).coerceIn(MIN_MAP_ZOOM, MAX_MAP_ZOOM)
                                         val actualZoom = newScale / oldScale
 
                                         val cx = viewportSize.width / 2f
                                         val cy = viewportSize.height / 2f
 
                                         scale = newScale
-                                        // Shift the map to compensate for the zoom shifting
-                                        offsetX = offsetX + (cursorPosition.x - cx - offsetX) * (1 - actualZoom)
-                                        offsetY = offsetY + (cursorPosition.y - cy - offsetY) * (1 - actualZoom)
+                                        var nextX = offsetX + (cursorPosition.x - cx - offsetX) * (1 - actualZoom)
+                                        var nextY = offsetY + (cursorPosition.y - cy - offsetY) * (1 - actualZoom)
+
+                                        val maxPanX = (viewportSize.width / 2f) + (tableWidth * newScale / 2f) - 100f
+                                        val maxPanY = (viewportSize.height / 2f) + (tableHeight * newScale / 2f) - 100f
+                                        if (maxPanX > 0) nextX = nextX.coerceIn(-maxPanX, maxPanX)
+                                        if (maxPanY > 0) nextY = nextY.coerceIn(-maxPanY, maxPanY)
+
+                                        offsetX = nextX
+                                        offsetY = nextY
 
                                         event.changes.forEach { it.consume() }
                                     }
@@ -205,10 +284,7 @@ fun MapViewer(
                         }
                     }
             ) {
-                val density = androidx.compose.ui.platform.LocalDensity.current
-                val imageWidthDp = with(density) { imageBitmap!!.width.toDp() }
-                val imageHeightDp = with(density) { imageBitmap!!.height.toDp() }
-
+                // Grand War Table (Normal) or Pure Map Frame (Battery Saver)
                 Box(
                     modifier = Modifier
                         .align(Alignment.Center)
@@ -218,19 +294,81 @@ fun MapViewer(
                             translationX = animatedOffsetX.value,
                             translationY = animatedOffsetY.value
                         )
-                        .requiredSize(imageWidthDp, imageHeightDp)
+                        .size(
+                            if (!isEcoMode) tableWidthDp else baseMapWidthDp,
+                            if (!isEcoMode) tableHeightDp else baseMapHeightDp
+                        )
                 ) {
+                    if (!isEcoMode) {
+                        // 0. Fur Pelt Rug on stone floor peeking out from under the table
+                        TabletopFurPelt(
+                            tableWidth = tableWidthDp,
+                            tableHeight = tableHeightDp
+                        )
+
+                        // 1. Realistic Deep Table Drop Shadow on Chamber Stone Floor
+                        RealisticTableDropShadow(
+                            shape = RoundedCornerShape(10.dp)
+                        )
+
+                        // 2. Grand War Table Surface (Cropped pure wood & carved border)
+                        Image(
+                            painter = painterResource(Res.drawable.tabletop_hero),
+                            contentDescription = "Grand War Table",
+                            contentScale = ContentScale.FillBounds,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(10.dp))
+                        )
+                    }
+
+                    // 3. Map Parchment & Accents Container
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .size(baseMapWidthDp, baseMapHeightDp)
+                            .then(
+                                if (isEcoMode) {
+                                    Modifier
+                                        .background(GrimoireColors.SurfaceCard, RoundedCornerShape(6.dp))
+                                        .border(BorderStroke(1.dp, GrimoireColors.BorderBronze), RoundedCornerShape(6.dp))
+                                } else Modifier
+                            )
+                    ) {
+                        if (!isEcoMode) {
+                            // 0. Tabletop Props on the wood desk (Dice, Coins, Quill)
+                            TabletopPropsDeskLayer(
+                                mapWidth = baseMapWidthDp,
+                                mapHeight = baseMapHeightDp
+                            )
+
+                            // 1. Soft Parchment Drop Shadow on the wooden desk
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer {
+                                        shadowElevation = 18.dp.toPx()
+                                        shape = RoundedCornerShape(8.dp)
+                                        clip = false
+                                    }
+                            )
+                        }
+
+                    // 2. Crisp Parchment Map Image
                     Image(
                         bitmap = imageBitmap!!, 
                         contentDescription = "Map",
-                        modifier = Modifier.fillMaxSize().pointerInput(addPinMode) {
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(8.dp))
+                            .pointerInput(addPinMode) {
                             awaitPointerEventScope {
                                 while (true) {
                                     val event = awaitPointerEvent()
                                     if (addPinMode && event.type == androidx.compose.ui.input.pointer.PointerEventType.Press) {
                                         val position = event.changes.first().position
-                                        val x = (position.x / imageBitmap!!.width).coerceIn(0f, 1f)
-                                        val y = (position.y / imageBitmap!!.height).coerceIn(0f, 1f)
+                                        val x = (position.x / baseMapWidth).coerceIn(0f, 1f)
+                                        val y = (position.y / baseMapHeight).coerceIn(0f, 1f)
                                         
                                         val newMarker = MapMarker(
                                             id = UUID.randomUUID().toString(),
@@ -245,11 +383,19 @@ fun MapViewer(
                             }
                         }
                     )
-                    
+
+                    if (!isEcoMode) {
+                        // Tabletop Accents holding down the parchment map (Compass, Wax Seal)
+                        TabletopPropsMapAccentsLayer(
+                            mapWidth = baseMapWidthDp,
+                            mapHeight = baseMapHeightDp
+                        )
+                    }
+
                     // Render markers
                     visibleMarkers.forEach { marker ->
-                        val pxX = marker.x * imageBitmap!!.width
-                        val pxY = marker.y * imageBitmap!!.height
+                        val pxX = marker.x * baseMapWidth
+                        val pxY = marker.y * baseMapHeight
 
                         var rightClickMenuOpened by remember { mutableStateOf(false) }
                         
@@ -371,6 +517,7 @@ fun MapViewer(
                     }
                 }
             }
+        }
             
             if (showMarkerDialog != null) {
                 MapMarkerDialog(
@@ -410,7 +557,7 @@ fun MapViewer(
             Row(modifier = Modifier.padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = {
                     val oldScale = scale
-                    val newScale = (scale * 1.2f).coerceIn(0.1f, 5f)
+                    val newScale = (scale * 1.2f).coerceIn(MIN_MAP_ZOOM, MAX_MAP_ZOOM)
                     val actualZoom = newScale / oldScale
                     scale = newScale
                     offsetX *= actualZoom
@@ -418,7 +565,7 @@ fun MapViewer(
                 }) { Text("+") }
                 Button(onClick = {
                     val oldScale = scale
-                    val newScale = (scale / 1.2f).coerceIn(0.1f, 5f)
+                    val newScale = (scale / 1.2f).coerceIn(MIN_MAP_ZOOM, MAX_MAP_ZOOM)
                     val actualZoom = newScale / oldScale
                     scale = newScale
                     offsetX *= actualZoom
