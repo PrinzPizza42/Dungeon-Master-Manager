@@ -23,6 +23,8 @@ kotlin {
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.sqldelight.driver)
             implementation(libs.sqldelight.coroutines)
+            implementation(libs.jna)
+            implementation(libs.jna.platform)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

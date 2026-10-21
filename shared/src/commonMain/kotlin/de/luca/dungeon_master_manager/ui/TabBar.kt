@@ -68,7 +68,7 @@ fun TabBar(
 }
 
 @Composable
-private fun TabItem(
+internal fun TabItem(
     tab: EditorTab,
     isActive: Boolean,
     onSelect: () -> Unit,

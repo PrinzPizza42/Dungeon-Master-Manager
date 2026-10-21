@@ -11,6 +11,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import de.luca.dungeon_master_manager.data.EntityPopoutRequest
+import de.luca.dungeon_master_manager.ui.components.GrimoireTitleBar
 import de.luca.dungeon_master_manager.ui.theme.GrimoireColors
 import de.luca.dungeon_master_manager.ui.theme.GrimoireDivider
 import de.luca.dungeon_master_manager.ui.theme.GrimoireTheme
@@ -18,12 +19,16 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.awt.Window
 
 @Composable
 fun EntityPopoutScreen(
     request: EntityPopoutRequest,
     onClose: () -> Unit,
-    onOpenEntityPopout: (EntityPopoutRequest) -> Unit
+    onOpenEntityPopout: (EntityPopoutRequest) -> Unit,
+    window: Window? = null,
+    windowState: androidx.compose.ui.window.WindowState? = null,
+    title: String = request.entityName
 ) {
     GrimoireTheme {
         val coroutineScope = rememberCoroutineScope()
@@ -82,19 +87,28 @@ fun EntityPopoutScreen(
         }
 
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            if (isLoading) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = GrimoireColors.GoldPrimary)
-                }
-            } else if (entity == null) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        "Entity '${request.entityName}' not found in project database.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+            Column(modifier = Modifier.fillMaxSize()) {
+                if (window != null && windowState != null) {
+                    GrimoireTitleBar(
+                        window = window,
+                        title = title,
+                        windowState = windowState,
+                        onCloseRequest = onClose
                     )
                 }
-            } else {
-                Column(modifier = Modifier.fillMaxSize()) {
+
+                if (isLoading) {
+                    Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = GrimoireColors.GoldPrimary)
+                    }
+                } else if (entity == null) {
+                    Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Text(
+                            "Entity '${request.entityName}' not found in project database.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
                     // Toolbar
                     Surface(color = GrimoireColors.Surface) {
                         Row(

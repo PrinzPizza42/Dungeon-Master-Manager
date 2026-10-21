@@ -14,11 +14,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import de.luca.dungeon_master_manager.data.EntityPopoutRequest
 import de.luca.dungeon_master_manager.data.FileExtensions
+import de.luca.dungeon_master_manager.ui.components.EditorUnifiedTopBar
+import de.luca.dungeon_master_manager.ui.components.GrimoireTitleBar
+import de.luca.dungeon_master_manager.ui.components.GrimoireWindowFrame
 import de.luca.dungeon_master_manager.ui.theme.GrimoireColors
 import de.luca.dungeon_master_manager.ui.theme.GrimoireDivider
 import de.luca.dungeon_master_manager.ui.theme.GrimoireTheme
 import de.luca.dungeon_master_manager.viewmodel.ProjectEditorViewModel
 import java.awt.Cursor
+import java.awt.Window
 
 /**
  * Main project editor screen with sidebar file tree, tab bar, and content area.
@@ -29,6 +33,10 @@ fun ProjectEditorScreen(
     applicationScope: androidx.compose.ui.window.ApplicationScope?,
     onBackToLauncher: () -> Unit,
     onOpenEntityPopout: (EntityPopoutRequest) -> Unit,
+    window: Window? = null,
+    windowState: androidx.compose.ui.window.WindowState? = null,
+    onCloseRequest: () -> Unit = {},
+    onTitleChange: (String) -> Unit = {},
 ) {
     val fileTree by viewModel.fileTree.collectAsState()
     val expandedPaths by viewModel.expandedPaths.collectAsState()
@@ -38,6 +46,18 @@ fun ProjectEditorScreen(
     val isLoadingContent by viewModel.isLoadingContent.collectAsState()
 
     val activeTab = openTabs.find { it.filePath == activeTabPath }
+
+    // Dynamic hierarchical title update
+    val currentTitle = remember(viewModel.project.config.name, activeTab?.fileName) {
+        if (activeTab != null) {
+            "${activeTab.fileName} - ${viewModel.project.config.name} - Dungeon Master Manager"
+        } else {
+            "${viewModel.project.config.name} - Dungeon Master Manager"
+        }
+    }
+    LaunchedEffect(currentTitle) {
+        onTitleChange(currentTitle)
+    }
     
     val entityViewModel = remember(viewModel.project.path) { 
         de.luca.dungeon_master_manager.viewmodel.EntityViewModel(viewModel.project.path, viewModel) 
@@ -54,14 +74,21 @@ fun ProjectEditorScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize().background(GrimoireColors.Background)) {
-        // Top toolbar
-        EditorToolbar(
-            projectName = viewModel.project.config.name,
-            onBack = onBackToLauncher,
-            onManageEntities = { showEntityDialog = true }
-        )
-
-        HorizontalDivider(color = GrimoireColors.BorderBronze)
+        // Unified Top Titlebar (replaces old EditorToolbar and TabBar)
+        if (window != null && windowState != null) {
+            EditorUnifiedTopBar(
+                window = window,
+                projectName = viewModel.project.config.name,
+                tabs = openTabs,
+                activeTabPath = activeTabPath,
+                onTabSelect = { viewModel.selectTab(it) },
+                onTabClose = { viewModel.closeTab(it) },
+                onTabPopOut = { viewModel.popOutTab(it) },
+                onBack = onBackToLauncher,
+                windowState = windowState,
+                onCloseRequest = onCloseRequest
+            )
+        }
 
         // Main content: sidebar + editor
         Row(modifier = Modifier.fillMaxSize()) {
@@ -86,24 +113,16 @@ fun ProjectEditorScreen(
                         e.printStackTrace()
                     }
                 },
+                onManageEntities = { showEntityDialog = true },
                 modifier = Modifier.width(260.dp).fillMaxHeight(),
             )
 
             VerticalDivider(color = GrimoireColors.BorderBronze)
 
-            // Editor area (tabs + content)
-            Column(modifier = Modifier.fillMaxSize()) {
-                // Tab bar
-                TabBar(
-                    tabs = openTabs,
-                    activeTabPath = activeTabPath,
-                    onTabSelect = { viewModel.selectTab(it) },
-                    onTabClose = { viewModel.closeTab(it) },
-                    onTabPopOut = { viewModel.popOutTab(it) },
-                )
-
+            // Content Area (Active tab or Empty state)
+            Box(modifier = Modifier.fillMaxSize()) {
                 if (openTabs.isNotEmpty()) {
-                    Surface(modifier = Modifier.weight(1f).fillMaxWidth(), color = MaterialTheme.colorScheme.background) {
+                    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                         ContentArea(
                             activeTab = activeTab,
                             fileContent = fileContent,
@@ -153,23 +172,48 @@ fun ProjectEditorScreen(
     if (applicationScope != null) {
         with(applicationScope) {
             for (poppedOut in poppedOutTabs) {
-                androidx.compose.ui.window.Window(
-                    onCloseRequest = { viewModel.closePoppedOutTab(poppedOut.tab.filePath) },
-                    title = poppedOut.tab.fileName,
-                ) {
-                    LaunchedEffect(poppedOut.focusTrigger) {
-                        window.toFront()
-                        window.requestFocus()
-                    }
-                    GrimoireTheme {
-                        StandaloneFileEditorWindow(
-                            tab = poppedOut.tab,
-                            projectPath = viewModel.project.path,
-                            entities = entities,
-                            onOpenEntityPopout = { entityName ->
-                                onOpenEntityPopout(EntityPopoutRequest(entityName, viewModel.project.path))
+                key(poppedOut.tab.filePath) {
+                    val detachedState = androidx.compose.ui.window.rememberWindowState(width = 800.dp, height = 600.dp)
+                    val detachedTitle = "${poppedOut.tab.fileName} - ${viewModel.project.config.name}"
+                    androidx.compose.ui.window.Window(
+                        onCloseRequest = { viewModel.closePoppedOutTab(poppedOut.tab.filePath) },
+                        title = detachedTitle,
+                        state = detachedState,
+                        undecorated = true,
+                    ) {
+                        val detachedWindow = this.window
+                        LaunchedEffect(poppedOut.focusTrigger) {
+                            detachedWindow.toFront()
+                            detachedWindow.requestFocus()
+                        }
+                        GrimoireTheme {
+                            GrimoireWindowFrame(
+                                window = detachedWindow,
+                                windowState = detachedState,
+                                minWidth = 400.dp,
+                                minHeight = 300.dp
+                            ) {
+                                Column(modifier = Modifier.fillMaxSize()) {
+                                    GrimoireTitleBar(
+                                        window = detachedWindow,
+                                        title = detachedTitle,
+                                        windowState = detachedState,
+                                        onCloseRequest = { viewModel.closePoppedOutTab(poppedOut.tab.filePath) },
+                                        subtitle = viewModel.project.config.name
+                                    )
+                                    Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                                        StandaloneFileEditorWindow(
+                                            tab = poppedOut.tab,
+                                            projectPath = viewModel.project.path,
+                                            entities = entities,
+                                            onOpenEntityPopout = { entityName ->
+                                                onOpenEntityPopout(EntityPopoutRequest(entityName, viewModel.project.path))
+                                            }
+                                        )
+                                    }
+                                }
                             }
-                        )
+                        }
                     }
                 }
             }
@@ -224,48 +268,6 @@ fun StandaloneFileEditorWindow(
     }
 }
 
-@Composable
-private fun EditorToolbar(
-    projectName: String,
-    onBack: () -> Unit,
-    onManageEntities: () -> Unit,
-) {
-    Surface(
-        color = GrimoireColors.Surface,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(
-                onClick = onBack,
-                colors = ButtonDefaults.textButtonColors(contentColor = GrimoireColors.ParchmentMuted)
-            ) {
-                Text("← Campaigns", style = MaterialTheme.typography.bodyMedium)
-            }
-            Spacer(Modifier.width(14.dp))
-            Text(
-                text = projectName,
-                style = MaterialTheme.typography.titleLarge,
-                color = GrimoireColors.GoldPrimary,
-            )
-            Spacer(Modifier.weight(1f))
-            Button(
-                onClick = onManageEntities,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = GrimoireColors.GoldContainer,
-                    contentColor = GrimoireColors.GoldBright
-                ),
-                shape = RoundedCornerShape(6.dp),
-                border = BorderStroke(1.dp, GrimoireColors.BorderGold)
-            ) {
-                Text("Entities", fontWeight = FontWeight.SemiBold)
-            }
-        }
-    }
-}
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -280,6 +282,7 @@ private fun EditorSidebar(
     onDeleteFile: (de.luca.dungeon_master_manager.data.FileNode) -> Unit,
     onPopOutClick: (de.luca.dungeon_master_manager.data.FileNode) -> Unit,
     onOpenNativeExplorer: () -> Unit,
+    onManageEntities: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var showNewFileDialog by remember { mutableStateOf(false) }
@@ -330,7 +333,8 @@ private fun EditorSidebar(
                 val scrollState = rememberScrollState()
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
+                        .weight(1f)
+                        .fillMaxWidth()
                         .verticalScroll(scrollState)
                 ) {
                     FileTreeView(
@@ -346,10 +350,36 @@ private fun EditorSidebar(
                 }
             } else {
                 Box(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
                     contentAlignment = Alignment.Center,
                 ) {
                     CircularProgressIndicator(modifier = Modifier.size(24.dp), color = GrimoireColors.GoldPrimary)
+                }
+            }
+
+            // Entities button at the bottom of the Explorer sidebar
+            HorizontalDivider(color = GrimoireColors.BorderBronze)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                Button(
+                    onClick = onManageEntities,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = GrimoireColors.GoldContainer,
+                        contentColor = GrimoireColors.GoldBright
+                    ),
+                    shape = RoundedCornerShape(4.dp),
+                    border = BorderStroke(1.dp, GrimoireColors.BorderGold),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.fillMaxWidth().height(32.dp)
+                ) {
+                    Text(
+                        "❖ Entities",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
             }
         }
