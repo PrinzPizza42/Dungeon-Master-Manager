@@ -10,10 +10,25 @@ import de.luca.dungeon_master_manager.ui.components.GrimoireWindowFrame
 import de.luca.dungeon_master_manager.ui.theme.GrimoireTheme
 import java.io.File
 
+private data class OpenEntityPopoutWindow(
+    val request: EntityPopoutRequest,
+    val focusTrigger: Int = 0
+)
+
 fun main() = application {
-    val openEntityWindows = remember { mutableStateListOf<EntityPopoutRequest>() }
+    val openEntityWindows = remember { mutableStateListOf<OpenEntityPopoutWindow>() }
     var mainWindowTitle by remember { mutableStateOf("Dungeon Master Manager") }
     val mainWindowState = rememberWindowState(width = 1200.dp, height = 800.dp)
+
+    val handleOpenEntityPopout: (EntityPopoutRequest) -> Unit = { request ->
+        val existingIndex = openEntityWindows.indexOfFirst { it.request == request }
+        if (existingIndex != -1) {
+            val existing = openEntityWindows[existingIndex]
+            openEntityWindows[existingIndex] = existing.copy(focusTrigger = existing.focusTrigger + 1)
+        } else {
+            openEntityWindows.add(OpenEntityPopoutWindow(request))
+        }
+    }
 
     Window(
         onCloseRequest = ::exitApplication,
@@ -33,25 +48,21 @@ fun main() = application {
                 windowState = mainWindowState,
                 onCloseRequest = ::exitApplication,
                 onTitleChange = { mainWindowTitle = it },
-                onOpenEntityPopout = { request ->
-                    if (!openEntityWindows.contains(request)) {
-                        openEntityWindows.add(request)
-                    }
-                }
+                onOpenEntityPopout = handleOpenEntityPopout
             )
         }
     }
 
-    for (request in openEntityWindows) {
-        key(request) {
+    for (entry in openEntityWindows) {
+        key(entry.request) {
             val entityState = rememberWindowState(width = 750.dp, height = 580.dp)
-            val campaignName = if (request.projectPath.isNotBlank()) {
-                File(request.projectPath).name
+            val campaignName = if (entry.request.projectPath.isNotBlank()) {
+                File(entry.request.projectPath).name
             } else "Global"
-            val entityTitle = "${request.entityName} - Entity ($campaignName)"
+            val entityTitle = "${entry.request.entityName} - Entity ($campaignName)"
 
             Window(
-                onCloseRequest = { openEntityWindows.remove(request) },
+                onCloseRequest = { openEntityWindows.removeAll { it.request == entry.request } },
                 title = entityTitle,
                 state = entityState,
                 undecorated = true,
@@ -60,20 +71,17 @@ fun main() = application {
                     GrimoireWindowFrame(
                         window = window,
                         windowState = entityState,
+                        focusTrigger = entry.focusTrigger,
                         minWidth = 400.dp,
                         minHeight = 300.dp
                     ) {
                         de.luca.dungeon_master_manager.ui.EntityPopoutScreen(
-                            request = request,
+                            request = entry.request,
                             window = window,
                             windowState = entityState,
                             title = entityTitle,
-                            onClose = { openEntityWindows.remove(request) },
-                            onOpenEntityPopout = { newRequest ->
-                                if (!openEntityWindows.contains(newRequest)) {
-                                    openEntityWindows.add(newRequest)
-                                }
-                            }
+                            onClose = { openEntityWindows.removeAll { it.request == entry.request } },
+                            onOpenEntityPopout = handleOpenEntityPopout
                         )
                     }
                 }

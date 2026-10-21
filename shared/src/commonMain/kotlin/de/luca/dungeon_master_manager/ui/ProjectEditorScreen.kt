@@ -182,14 +182,11 @@ fun ProjectEditorScreen(
                         undecorated = true,
                     ) {
                         val detachedWindow = this.window
-                        LaunchedEffect(poppedOut.focusTrigger) {
-                            detachedWindow.toFront()
-                            detachedWindow.requestFocus()
-                        }
                         GrimoireTheme {
                             GrimoireWindowFrame(
                                 window = detachedWindow,
                                 windowState = detachedState,
+                                focusTrigger = poppedOut.focusTrigger,
                                 minWidth = 400.dp,
                                 minHeight = 300.dp
                             ) {

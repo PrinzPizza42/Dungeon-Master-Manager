@@ -161,6 +161,21 @@ object WindowsDwmHelper {
     }
 
     /**
+     * Brings the native Windows window to top and sets it as the foreground window.
+     */
+    fun activate(window: Window): Boolean {
+        if (!isWindows) return false
+        val hwnd = getHwnd(window) ?: return false
+        return try {
+            User32.INSTANCE.BringWindowToTop(hwnd)
+            User32.INSTANCE.SetForegroundWindow(hwnd)
+            true
+        } catch (e: Throwable) {
+            false
+        }
+    }
+
+    /**
      * Sends SC_CLOSE via WM_SYSCOMMAND to trigger standard window closing.
      */
     fun close(window: Window): Boolean {
