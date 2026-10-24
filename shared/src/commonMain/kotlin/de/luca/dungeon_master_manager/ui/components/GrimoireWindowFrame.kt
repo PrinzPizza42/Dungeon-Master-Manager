@@ -37,9 +37,15 @@ fun GrimoireWindowFrame(
     windowState: WindowState,
     minWidth: Dp = 480.dp,
     minHeight: Dp = 360.dp,
+    focusTrigger: Any? = null,
+    bringToFrontOnShow: Boolean = true,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
+    if (bringToFrontOnShow || focusTrigger != null) {
+        BringWindowToFrontEffect(window = window, trigger = focusTrigger)
+    }
+
     val isMaximized = windowState.placement == WindowPlacement.Maximized
     val borderThickness = if (isMaximized) 0.dp else 1.dp
     val handleThickness = 6.dp

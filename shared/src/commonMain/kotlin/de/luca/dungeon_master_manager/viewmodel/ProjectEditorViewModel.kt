@@ -95,9 +95,15 @@ class ProjectEditorViewModel(
     fun popOutTab(filePath: String) {
         val tab = _openTabs.value.find { it.filePath == filePath } ?: return
         closeTab(filePath)
-        if (!_poppedOutTabs.value.any { it.tab.filePath == filePath }) {
-            _poppedOutTabs.value = _poppedOutTabs.value + PoppedOutTab(tab)
+        val poppedIndex = _poppedOutTabs.value.indexOfFirst { it.tab.filePath == filePath }
+        if (poppedIndex != -1) {
+            val old = _poppedOutTabs.value[poppedIndex]
+            val newList = _poppedOutTabs.value.toMutableList()
+            newList[poppedIndex] = old.copy(focusTrigger = old.focusTrigger + 1)
+            _poppedOutTabs.value = newList
+            return
         }
+        _poppedOutTabs.value = _poppedOutTabs.value + PoppedOutTab(tab)
     }
 
     fun openAsWindow(node: FileNode) {
