@@ -101,7 +101,7 @@ fun ProjectLauncherScreen(
                             }
                     )
 
-                    val diceBitmap = imageResource(Res.drawable.prop_dice)
+                    val diceBitmap = imageResource(Res.drawable.dnd_dice)
                     Image(
                         bitmap = diceBitmap,
                         contentDescription = "RPG Dice",

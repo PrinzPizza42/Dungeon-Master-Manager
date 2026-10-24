@@ -27,7 +27,6 @@ import dungeon_master_manager.shared.generated.resources.tabletop_dark
 import dungeon_master_manager.shared.generated.resources.stone_floor_dark
 import dungeon_master_manager.shared.generated.resources.prop_coins
 import dungeon_master_manager.shared.generated.resources.prop_compass
-import dungeon_master_manager.shared.generated.resources.prop_dice
 import dungeon_master_manager.shared.generated.resources.prop_quill
 import dungeon_master_manager.shared.generated.resources.prop_seal
 import dungeon_master_manager.shared.generated.resources.prop_fur_pelt
@@ -38,6 +37,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import dungeon_master_manager.shared.generated.resources.dnd_dice
 import kotlin.random.Random
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.imageResource
@@ -515,7 +515,7 @@ fun TabletopPropsDeskLayer(
     mapWidth: Dp,
     mapHeight: Dp
 ) {
-    val diceBitmap = imageResource(Res.drawable.prop_dice)
+    val diceBitmap = imageResource(Res.drawable.dnd_dice)
     val coinsBitmap = imageResource(Res.drawable.prop_coins)
     val quillBitmap = imageResource(Res.drawable.prop_quill)
 
