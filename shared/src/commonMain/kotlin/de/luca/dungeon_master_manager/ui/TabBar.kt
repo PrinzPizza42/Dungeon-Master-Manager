@@ -27,7 +27,7 @@ import de.luca.dungeon_master_manager.data.EditorTab
 import de.luca.dungeon_master_manager.ui.theme.GrimoireColors
 
 /**
- * Horizontal tab bar for open chronicles and manuscripts.
+ * Horizontal tab bar for open tabs.
  */
 @Composable
 fun TabBar(

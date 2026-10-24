@@ -255,7 +255,7 @@ fun ProjectLauncherScreen(
             },
             text = {
                 Text(
-                    "Delete \"${project.config.name}\" and all its chronicles? This cannot be undone.",
+                    "Delete \"${project.config.name}\"? This cannot be undone.",
                     color = GrimoireColors.ParchmentLight
                 )
             },
@@ -321,7 +321,7 @@ private fun ProjectCard(
                 }
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Chronicle recorded on ${dateFormat.format(Date(project.config.createdAt))}",
+                    "Campaign recorded on ${dateFormat.format(Date(project.config.createdAt))}",
                     style = MaterialTheme.typography.bodySmall,
                     color = GrimoireColors.ParchmentDim,
                 )
@@ -365,7 +365,7 @@ private fun CreateProjectDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                "New Campaign Chronicle",
+                "New Campaign",
                 style = MaterialTheme.typography.titleLarge,
                 color = GrimoireColors.GoldPrimary
             )
@@ -455,7 +455,7 @@ private fun LauncherFolioContent(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Select a campaign or create a new chronicle",
+                    "Select a campaign",
                     style = MaterialTheme.typography.bodyMedium,
                     color = GrimoireColors.ParchmentMuted,
                     maxLines = 1
