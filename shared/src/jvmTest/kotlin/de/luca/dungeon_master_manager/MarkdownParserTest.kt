@@ -1,5 +1,7 @@
 package de.luca.dungeon_master_manager
 
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
@@ -8,9 +10,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.unit.sp
 import de.luca.dungeon_master_manager.data.AppSettingsRepository
+import de.luca.dungeon_master_manager.ui.EntityHoverTextLayout
 import de.luca.dungeon_master_manager.ui.VerticalTextLayout
 import de.luca.dungeon_master_manager.ui.calculateVerticalMove
 import de.luca.dungeon_master_manager.ui.expandMarkdownTokenSelection
+import de.luca.dungeon_master_manager.ui.findEntityAtPosition
 import de.luca.dungeon_master_manager.ui.parseMarkdown
 import de.luca.dungeon_master_manager.ui.replaceEntityQueryWithLink
 import de.luca.dungeonmastermanager.database.Entity
@@ -992,5 +996,52 @@ wawdawawdawdawdawwd awd awdwd awdawd awd awd awdwd awdwdadadawdawd awd
         assertEquals(min, (5).coerceIn(min, max))
         assertEquals(max, (50).coerceIn(min, max))
         assertEquals(20, (20).coerceIn(min, max))
+    }
+
+    @Test
+    fun testFindEntityAtPosition_HoverDetection() {
+        val ent1 = Entity("id-grom", "Grom the Goblin", "NPC", null, null)
+        val text = "Meet @[id-grom] here."
+        val (annotated, mapping) = parseMarkdown(text, primaryColor, TextRange(0), listOf(ent1), fantasyFamily)
+        assertEquals("Meet Grom the Goblin here.", annotated.text)
+
+        // Mock layout where each character is 10px wide and 20px high
+        val mockLayout = object : EntityHoverTextLayout {
+            override val textLength: Int get() = annotated.text.length
+            override fun getBoundingBox(offset: Int): Rect {
+                val x = offset * 10f
+                return Rect(x, 0f, x + 10f, 20f)
+            }
+        }
+
+        // 'G' in "Grom..." is at transformed index 5 -> x between 50 and 60
+        val posOverGrom = Offset(55f, 10f)
+        val resultOverGrom = findEntityAtPosition(posOverGrom, mockLayout, mapping, text, listOf(ent1))
+        assertEquals(ent1, resultOverGrom, "Hovering over entity name must find the entity")
+
+        // Hovering right on the gap/boundary between characters (e.g. x = 70f between 'r' and 'o')
+        val posOnLetterGap = Offset(70f, 10f)
+        assertEquals(ent1, findEntityAtPosition(posOnLetterGap, mockLayout, mapping, text, listOf(ent1)), "Hovering on boundary between letters must find the entity")
+
+        // Hovering on the space between words in "Grom the Goblin" (e.g. space at index 9, x = 95f)
+        val posOnWordSpace = Offset(95f, 10f)
+        assertEquals(ent1, findEntityAtPosition(posOnWordSpace, mockLayout, mapping, text, listOf(ent1)), "Hovering on space between words inside entity must find the entity")
+
+        // Hovering slightly above the line within 2px padding (y = -1f)
+        val posSlightlyAbove = Offset(55f, -1f)
+        assertEquals(ent1, findEntityAtPosition(posSlightlyAbove, mockLayout, mapping, text, listOf(ent1)), "Hovering slightly above entity text within padding must find the entity")
+
+        // Hovering over "Meet " (x = 20) -> not an entity
+        val posOverMeet = Offset(20f, 10f)
+        val resultOverMeet = findEntityAtPosition(posOverMeet, mockLayout, mapping, text, listOf(ent1))
+        assertEquals(null, resultOverMeet, "Hovering over normal text must return null")
+
+        // Hovering far to the right in empty margin (x = 400, line ends earlier)
+        val posFarRight = Offset(400f, 10f)
+        val resultFarRight = findEntityAtPosition(posFarRight, mockLayout, mapping, text, listOf(ent1))
+        assertEquals(null, resultFarRight, "Hovering in margin far to the right must return null")
+
+        // Null layout returns null
+        assertEquals(null, findEntityAtPosition(posOverGrom, null as EntityHoverTextLayout?, mapping, text, listOf(ent1)))
     }
 }

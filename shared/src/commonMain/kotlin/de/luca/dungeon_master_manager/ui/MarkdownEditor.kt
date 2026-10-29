@@ -42,9 +42,11 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerButton
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.isMetaPressed
 import androidx.compose.ui.input.pointer.onPointerEvent
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -72,6 +74,9 @@ import dungeon_master_manager.shared.generated.resources.Res
 import dungeon_master_manager.shared.generated.resources.grimoire_vellum
 import de.luca.dungeonmastermanager.database.Entity
 import kotlinx.coroutines.launch
+import java.awt.KeyEventDispatcher
+import java.awt.KeyboardFocusManager
+import java.awt.event.KeyEvent
 
 @Composable
 fun MarkdownEditor(
@@ -84,6 +89,7 @@ fun MarkdownEditor(
     val settings by AppSettingsRepository.settings.collectAsState()
     val fontSize = settings.editorFontSize
     val coroutineScope = rememberCoroutineScope()
+    val focusRequester = remember { FocusRequester() }
 
     var textFieldValue by remember {
         mutableStateOf(TextFieldValue(content))
@@ -177,6 +183,64 @@ fun MarkdownEditor(
         onContentChange(newText)
     }
 
+    fun insertOrTriggerEntityLink() {
+        val text = textFieldValue.text
+        val selection = textFieldValue.selection
+        val before = text.substring(0, selection.min)
+        val selected = text.substring(selection.min, selection.max)
+        val after = text.substring(selection.max)
+
+        // Case 1: Already wrapped as @[id] -> unwrap back to inner text
+        if (selected.startsWith("@[") && selected.endsWith("]") && selected.length >= 3) {
+            val inner = selected.substring(2, selected.length - 1)
+            val newContent = "$before$inner$after"
+            val newSelection = TextRange(selection.min, selection.min + inner.length)
+            textFieldValue = TextFieldValue(newContent, newSelection)
+            onContentChange(newContent)
+            try { focusRequester.requestFocus() } catch (_: Exception) {}
+            return
+        }
+
+        // Case 2: Highlighted text exactly matches an existing entity name -> link directly as @[id]
+        val exactMatch = if (selected.isNotBlank()) {
+            entities.find { it.name.equals(selected.trim(), ignoreCase = true) }
+        } else null
+
+        if (exactMatch != null) {
+            val replacement = "@[${exactMatch.id}]"
+            val newContent = "$before$replacement$after"
+            val newSelection = TextRange(before.length, before.length + replacement.length)
+            textFieldValue = TextFieldValue(newContent, newSelection)
+            onContentChange(newContent)
+            try { focusRequester.requestFocus() } catch (_: Exception) {}
+            return
+        }
+
+        // Case 3: No entities exist in the project -> insert the raw syntax @[entity_id] as a template
+        if (entities.isEmpty()) {
+            val inner = if (selected.isNotBlank()) selected else "entity_id"
+            val placeholder = "@[$inner]"
+            val newContent = "$before$placeholder$after"
+            val selStart = before.length + 2
+            val selEnd = selStart + inner.length
+            val newSelection = TextRange(selStart, selEnd)
+            textFieldValue = TextFieldValue(newContent, newSelection)
+            onContentChange(newContent)
+            try { focusRequester.requestFocus() } catch (_: Exception) {}
+            return
+        }
+
+        // Case 4: Entities exist -> insert '@' (or '@selected' if text highlighted) to trigger the autocomplete popup
+        val query = selected.trim()
+        val insertText = if (before.endsWith("@")) query else "@$query"
+        val newContent = "$before$insertText$after"
+        val newCursor = before.length + insertText.length
+        val newSelection = TextRange(newCursor)
+        textFieldValue = TextFieldValue(newContent, newSelection)
+        onContentChange(newContent)
+        try { focusRequester.requestFocus() } catch (_: Exception) {}
+    }
+
     Column(modifier = modifier.fillMaxSize().background(GrimoireColors.Background)) {
         // Toolbar with Live-Preview actions
         Row(
@@ -195,6 +259,17 @@ fun MarkdownEditor(
                 modifier = Modifier.padding(end = 8.dp).defaultMinSize(minHeight = 30.dp)
             ) {
                 Text("+ Heading", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+            }
+
+            OutlinedButton(
+                onClick = { insertOrTriggerEntityLink() },
+                border = BorderStroke(1.dp, GrimoireColors.BorderBronze),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = GrimoireColors.GoldPrimary),
+                shape = RoundedCornerShape(4.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                modifier = Modifier.padding(end = 8.dp).defaultMinSize(minHeight = 30.dp)
+            ) {
+                Text("@ Entity", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
             }
 
             OutlinedButton(
@@ -242,7 +317,6 @@ fun MarkdownEditor(
 
         GrimoireDivider()
 
-        val focusRequester = remember { FocusRequester() }
         val verticalScrollState = rememberScrollState()
 
         Box(
@@ -411,15 +485,52 @@ private fun MarkdownEdit(
         }
     }
 
+    var lastMousePosition by remember { mutableStateOf<Offset?>(null) }
+    var isCtrlDown by remember { mutableStateOf(false) }
+
+    DisposableEffect(Unit) {
+        val dispatcher = KeyEventDispatcher { event ->
+            if (event.keyCode == KeyEvent.VK_CONTROL || event.keyCode == KeyEvent.VK_META) {
+                isCtrlDown = (event.id == KeyEvent.KEY_PRESSED)
+            }
+            false
+        }
+        KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(dispatcher)
+        onDispose {
+            KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(dispatcher)
+        }
+    }
+
+    val hoveredEntity = remember(lastMousePosition, isCtrlDown, textLayoutResult, textFieldValue.text, currentOffsetMapping, entities) {
+        if (!isCtrlDown || lastMousePosition == null) {
+            null
+        } else {
+            findEntityAtPosition(lastMousePosition!!, textLayoutResult, currentOffsetMapping, textFieldValue.text, entities)
+        }
+    }
+    val isHoveringEntityLink = hoveredEntity != null
+
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .tiledTexture(Res.drawable.grimoire_vellum, alpha = 0.08f)
+            .pointerHoverIcon(
+                icon = if (isHoveringEntityLink) PointerIcon.Hand else PointerIcon.Default,
+                overrideDescendants = isHoveringEntityLink
+            )
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
-                indication = null
+                indication = null,
+                enabled = !isHoveringEntityLink
             ) {
                 focusRequester.requestFocus()
+            }
+            .onPointerEvent(PointerEventType.Move) { event ->
+                lastMousePosition = event.changes.firstOrNull()?.position
+                isCtrlDown = event.keyboardModifiers.isCtrlPressed || event.keyboardModifiers.isMetaPressed
+            }
+            .onPointerEvent(PointerEventType.Exit) {
+                lastMousePosition = null
             }
             .onPointerEvent(PointerEventType.Scroll, pass = PointerEventPass.Initial) { event ->
                 val isCtrl = event.keyboardModifiers.isCtrlPressed || event.keyboardModifiers.isMetaPressed
@@ -434,25 +545,44 @@ private fun MarkdownEdit(
                     }
                 }
             }
-            .onPointerEvent(PointerEventType.Press) { event ->
-                stickyX = null
-                lastVerticalSelection = null
+            .onPointerEvent(PointerEventType.Press, pass = PointerEventPass.Initial) { event ->
                 val isCtrl = event.keyboardModifiers.isCtrlPressed || event.keyboardModifiers.isMetaPressed
                 if (isCtrl && event.button == PointerButton.Primary) {
                     val clickPos = event.changes.firstOrNull()?.position
                     val layout = textLayoutResult
                     if (clickPos != null && layout != null) {
-                        val transOffset = layout.getOffsetForPosition(clickPos)
-                        val origOffset = currentOffsetMapping.transformedToOriginal(transOffset)
-                        val entityMatch = ENTITY_MENTION_REGEX.findAll(textFieldValue.text)
-                            .find { origOffset in it.range.first..(it.range.last + 1) }
-                        if (entityMatch != null) {
-                            val entId = entityMatch.groups[1]!!.value
-                            val ent = entities.find { it.id == entId }
-                            if (ent != null) {
-                                onOpenEntityPopout(ent.name)
-                                event.changes.forEach { it.consume() }
-                            }
+                        val clickedEntity = findEntityAtPosition(
+                            pos = clickPos,
+                            layout = layout,
+                            offsetMapping = currentOffsetMapping,
+                            text = textFieldValue.text,
+                            entities = entities
+                        )
+                        if (clickedEntity != null) {
+                            onOpenEntityPopout(clickedEntity.name)
+                            event.changes.forEach { it.consume() }
+                        }
+                    }
+                } else {
+                    stickyX = null
+                    lastVerticalSelection = null
+                }
+            }
+            .onPointerEvent(PointerEventType.Release, pass = PointerEventPass.Initial) { event ->
+                val isCtrl = event.keyboardModifiers.isCtrlPressed || event.keyboardModifiers.isMetaPressed
+                if (isCtrl && event.button == PointerButton.Primary) {
+                    val clickPos = event.changes.firstOrNull()?.position
+                    val layout = textLayoutResult
+                    if (clickPos != null && layout != null) {
+                        val clickedEntity = findEntityAtPosition(
+                            pos = clickPos,
+                            layout = layout,
+                            offsetMapping = currentOffsetMapping,
+                            text = textFieldValue.text,
+                            entities = entities
+                        )
+                        if (clickedEntity != null) {
+                            event.changes.forEach { it.consume() }
                         }
                     }
                 }
@@ -499,19 +629,26 @@ private fun MarkdownEdit(
         ) {
             BasicTextField(
                 value = textFieldValue,
-                onValueChange = onValueChange,
+                onValueChange = { newValue ->
+                    if (isHoveringEntityLink && newValue.text == textFieldValue.text) {
+                        return@BasicTextField
+                    }
+                    onValueChange(newValue)
+                },
                 onTextLayout = { textLayoutResult = it },
                 modifier = Modifier
                     .fillMaxWidth()
                     .focusRequester(focusRequester)
                     .bringIntoViewRequester(bringIntoViewRequester)
                     .onPreviewKeyEvent { keyEvent ->
+                        val isCtrl = keyEvent.isCtrlPressed || keyEvent.isMetaPressed
+                        isCtrlDown = isCtrl
+
                         if (keyEvent.type != KeyEventType.KeyDown) {
                             return@onPreviewKeyEvent false
                         }
 
                         val key = keyEvent.key
-                        val isCtrl = keyEvent.isCtrlPressed || keyEvent.isMetaPressed
 
                         if (isCtrl && !keyEvent.isAltPressed) {
                             when (key) {
@@ -694,6 +831,75 @@ private fun MarkdownEdit(
 }
 
 internal val ENTITY_MENTION_REGEX = Regex("(?<!\\\\)@\\[(.*?)\\]")
+
+internal interface EntityHoverTextLayout {
+    val textLength: Int
+    fun getBoundingBox(offset: Int): Rect
+}
+
+internal fun TextLayoutResult.asEntityHoverTextLayout(): EntityHoverTextLayout = object : EntityHoverTextLayout {
+    override val textLength: Int get() = this@asEntityHoverTextLayout.layoutInput.text.length
+    override fun getBoundingBox(offset: Int): Rect = this@asEntityHoverTextLayout.getBoundingBox(offset)
+}
+
+internal fun findEntityAtPosition(
+    pos: Offset,
+    layout: EntityHoverTextLayout?,
+    offsetMapping: OffsetMapping,
+    text: String,
+    entities: List<Entity>
+): Entity? {
+    if (layout == null || layout.textLength == 0) return null
+
+    for (match in ENTITY_MENTION_REGEX.findAll(text)) {
+        val entId = match.groups[1]?.value ?: continue
+        val ent = entities.find { it.id == entId } ?: continue
+
+        val transStart = offsetMapping.originalToTransformed(match.range.first)
+            .coerceIn(0, layout.textLength)
+        if (transStart >= layout.textLength) continue
+
+        var transEnd = transStart
+        while (transEnd < layout.textLength && offsetMapping.transformedToOriginal(transEnd) in match.range) {
+            transEnd++
+        }
+
+        if (transEnd <= transStart) continue
+
+        val firstCharBox = layout.getBoundingBox(transStart)
+        val lastCharBox = layout.getBoundingBox(transEnd - 1)
+
+        val isSingleLine = kotlin.math.abs(firstCharBox.top - lastCharBox.top) < 2f
+        if (isSingleLine) {
+            val linkRect = Rect(
+                left = minOf(firstCharBox.left, lastCharBox.left) - 2f,
+                top = minOf(firstCharBox.top, lastCharBox.top) - 2f,
+                right = maxOf(firstCharBox.right, lastCharBox.right) + 2f,
+                bottom = maxOf(firstCharBox.bottom, lastCharBox.bottom) + 2f
+            )
+            if (linkRect.contains(pos)) {
+                return ent
+            }
+        } else {
+            for (t in transStart until transEnd) {
+                val charBox = layout.getBoundingBox(t).inflate(2f)
+                if (charBox.contains(pos)) {
+                    return ent
+                }
+            }
+        }
+    }
+
+    return null
+}
+
+internal fun findEntityAtPosition(
+    pos: Offset,
+    layout: TextLayoutResult?,
+    offsetMapping: OffsetMapping,
+    text: String,
+    entities: List<Entity>
+): Entity? = findEntityAtPosition(pos, layout?.asEntityHoverTextLayout(), offsetMapping, text, entities)
 
 internal fun replaceEntityQueryWithLink(
     text: String,
