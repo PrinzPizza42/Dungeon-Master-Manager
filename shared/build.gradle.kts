@@ -28,6 +28,7 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
+            implementation(compose.desktop.currentOs)
         }
     }
 }

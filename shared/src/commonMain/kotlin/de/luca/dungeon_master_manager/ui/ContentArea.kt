@@ -92,7 +92,8 @@ fun ContentArea(
                         ImageViewer(
                             filePath = activeTab.filePath,
                             fileName = activeTab.fileName,
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier.fillMaxSize(),
+                            projectPath = projectPath
                         )
                     }
                     FileExtensions.isText(activeTab.extension) -> key(activeTab.filePath) {

@@ -29,7 +29,6 @@ import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.res.loadImageBitmap
 import androidx.compose.ui.unit.dp
 import de.luca.dungeon_master_manager.colorElement
 import de.luca.dungeon_master_manager.ui.theme.GrimoireColors
@@ -40,16 +39,11 @@ import dungeon_master_manager.shared.generated.resources.Res
 import dungeon_master_manager.shared.generated.resources.tabletop_hero
 import org.jetbrains.compose.resources.painterResource
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.border
 import de.luca.dungeon_master_manager.ui.theme.TabletopPropsDeskLayer
 import de.luca.dungeon_master_manager.ui.theme.TabletopPropsMapAccentsLayer
 import de.luca.dungeon_master_manager.ui.theme.RealisticTableDropShadow
 import de.luca.dungeon_master_manager.ui.theme.TabletopFurPelt
-import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.BlendMode
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.draw.drawWithContent
 import de.luca.dungeon_master_manager.ui.theme.MapBoundaryFogOverlay
 import de.luca.dungeon_master_manager.ui.theme.FogOfWarSurface
 import androidx.compose.foundation.BorderStroke
@@ -57,6 +51,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import de.luca.dungeon_master_manager.data.MapData
 import de.luca.dungeon_master_manager.data.MapMarker
 import de.luca.dungeon_master_manager.random
+import de.luca.dungeon_master_manager.ui.map.*
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
@@ -72,7 +67,7 @@ fun MapViewer(
     onOpenEntityPopout: (String) -> Unit
 ) {
     val json = remember { Json { ignoreUnknownKeys = true } }
-    
+
     var mapData by remember(content) {
         mutableStateOf(
             try {
@@ -92,19 +87,23 @@ fun MapViewer(
     val coroutineScope = rememberCoroutineScope()
     var zoomJob by remember { mutableStateOf<Job?>(null) }
 
-    val viewModel = remember(projectPath) { de.luca.dungeon_master_manager.viewmodel.EntityViewModel(
-        projectPath,
-        null
-    ) }
+    val viewModel = remember(projectPath) {
+        de.luca.dungeon_master_manager.viewmodel.EntityViewModel(
+            projectPath,
+            null
+        )
+    }
     val projectEnts by viewModel.projectEntities.collectAsState()
     val globalEnts by viewModel.globalEntities.collectAsState()
     val isLoaded by viewModel.isLoaded.collectAsState()
-    
+
     // Auto-save function
     fun saveMap() {
         try {
             onContentChange(json.encodeToString(mapData))
-        } catch(e: Exception) { e.printStackTrace() }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     LaunchedEffect(isLoaded, projectEnts, globalEnts) {
@@ -143,7 +142,7 @@ fun MapViewer(
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("Image not found: ${mapData.imagePath}", color = MaterialTheme.colorScheme.error)
                 Spacer(Modifier.height(16.dp))
-                Button(onClick = { 
+                Button(onClick = {
                     mapData = mapData.copy(imagePath = "")
                     saveMap()
                 }) {
@@ -154,16 +153,10 @@ fun MapViewer(
         return
     }
 
-    var imageBitmap by remember(imageFile.absolutePath) { mutableStateOf<ImageBitmap?>(null) }
-    LaunchedEffect(imageFile.absolutePath) {
-        try {
-            imageFile.inputStream().use {
-                imageBitmap = loadImageBitmap(it)
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
+    // High performance LOD tile pyramid manager
+    val tileState by remember(imageFile.absolutePath, projectPath) {
+        MapTileCacheManager.getOrLoadState(projectPath, imageFile, coroutineScope)
+    }.collectAsState()
 
     var addPinMode by remember { mutableStateOf(false) }
     val appSettings by AppSettingsRepository.settings.collectAsState()
@@ -176,228 +169,246 @@ fun MapViewer(
         if (!isEcoMode) {
             GrimoireAmbientChamber(
                 modifier = Modifier.fillMaxSize(),
-                panOffset = androidx.compose.ui.geometry.Offset(offsetX, offsetY),
-                zoomScale = scale
+                panOffsetProvider = { androidx.compose.ui.geometry.Offset(offsetX, offsetY) },
+                zoomScaleProvider = { scale }
             )
         } else {
             Box(modifier = Modifier.fillMaxSize().background(GrimoireColors.Background))
         }
 
-        if (imageBitmap != null) {
-            var showMarkerDialog by remember { mutableStateOf<MapMarker?>(null) }
+        var showMarkerDialog by remember { mutableStateOf<MapMarker?>(null) }
 
-            val density = androidx.compose.ui.platform.LocalDensity.current
-            val imgW = imageBitmap!!.width.toFloat()
-            val imgH = imageBitmap!!.height.toFloat()
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val imgW = tileState.manifest?.originalWidth?.toFloat()
+            ?: tileState.lod0Bitmap?.width?.toFloat()
+            ?: 1920f
+        val imgH = tileState.manifest?.originalHeight?.toFloat()
+            ?: tileState.lod0Bitmap?.height?.toFloat()
+            ?: 1080f
 
-            // Viewport-normalized base display size for the map:
-            // At zoom = 1.0f, the map occupies ~72% of the viewport dimensions, maintaining its native aspect ratio.
-            val vw = if (viewportSize.width > 0) viewportSize.width.toFloat() else 1920f
-            val vh = if (viewportSize.height > 0) viewportSize.height.toFloat() else 1080f
-            val targetMapW = vw * 0.72f
-            val targetMapH = vh * 0.72f
-            val fitScale = minOf(targetMapW / imgW, targetMapH / imgH)
-            val baseMapWidth = imgW * fitScale
-            val baseMapHeight = imgH * fitScale
+        // Viewport-normalized base display size for the map:
+        val vw = if (viewportSize.width > 0) viewportSize.width.toFloat() else 1920f
+        val vh = if (viewportSize.height > 0) viewportSize.height.toFloat() else 1080f
+        val targetMapW = vw * 0.72f
+        val targetMapH = vh * 0.72f
+        val fitScale = minOf(targetMapW / imgW, targetMapH / imgH)
+        val baseMapWidth = imgW * fitScale
+        val baseMapHeight = imgH * fitScale
 
-            val baseMapWidthDp = with(density) { baseMapWidth.toDp() }
-            val baseMapHeightDp = with(density) { baseMapHeight.toDp() }
+        val baseMapWidthDp = with(density) { baseMapWidth.toDp() }
+        val baseMapHeightDp = with(density) { baseMapHeight.toDp() }
 
-            // Grand War Table dimensions: Generously frames the map with ample desk margins
-            val marginX = maxOf(baseMapWidth * 0.30f, with(density) { 180.dp.toPx() })
-            val marginY = maxOf(baseMapHeight * 0.30f, with(density) { 140.dp.toPx() })
-            val tableWidth = baseMapWidth + marginX * 2f
-            val tableHeight = baseMapHeight + marginY * 2f
-            val tableWidthDp = with(density) { tableWidth.toDp() }
-            val tableHeightDp = with(density) { tableHeight.toDp() }
+        // Grand War Table dimensions: Generously frames the map with ample desk margins
+        val marginX = maxOf(baseMapWidth * 0.30f, with(density) { 180.dp.toPx() })
+        val marginY = maxOf(baseMapHeight * 0.30f, with(density) { 140.dp.toPx() })
+        val tableWidth = baseMapWidth + marginX * 2f
+        val tableHeight = baseMapHeight + marginY * 2f
+        val tableWidthDp = with(density) { tableWidth.toDp() }
+        val tableHeightDp = with(density) { tableHeight.toDp() }
 
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clipToBounds()
-                    .pointerInput(Unit) {
-                        detectTransformGestures { _, pan, _, _ ->
-                            if (!addPinMode && viewportSize.width > 0) {
-                                zoomJob?.cancel() // Cancel any ongoing zoom animation immediately on drag
-                                val effectiveW = if (!isEcoMode) tableWidth else baseMapWidth
-                                val effectiveH = if (!isEcoMode) tableHeight else baseMapHeight
-                                val maxPanX = (viewportSize.width / 2f) + (effectiveW * scale / 2f) - 100f
-                                val maxPanY = (viewportSize.height / 2f) + (effectiveH * scale / 2f) - 100f
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clipToBounds()
+                .pointerInput(Unit) {
+                    detectTransformGestures { _, pan, _, _ ->
+                        if (!addPinMode && viewportSize.width > 0) {
+                            zoomJob?.cancel() // Cancel ongoing zoom animation immediately on drag
+                            val effectiveW = if (!isEcoMode) tableWidth else baseMapWidth
+                            val effectiveH = if (!isEcoMode) tableHeight else baseMapHeight
+                            val maxPanX = (viewportSize.width / 2f) + (effectiveW * scale / 2f) - 100f
+                            val maxPanY = (viewportSize.height / 2f) + (effectiveH * scale / 2f) - 100f
 
-                                var nextX = offsetX + pan.x
-                                var nextY = offsetY + pan.y
-                                if (maxPanX > 0) nextX = nextX.coerceIn(-maxPanX, maxPanX)
-                                if (maxPanY > 0) nextY = nextY.coerceIn(-maxPanY, maxPanY)
+                            var nextX = offsetX + pan.x
+                            var nextY = offsetY + pan.y
+                            if (maxPanX > 0) nextX = nextX.coerceIn(-maxPanX, maxPanX)
+                            if (maxPanY > 0) nextY = nextY.coerceIn(-maxPanY, maxPanY)
 
-                                offsetX = nextX
-                                offsetY = nextY
-                                targetScale = scale
-                                targetOffsetX = offsetX
-                                targetOffsetY = offsetY
-                            }
+                            offsetX = nextX
+                            offsetY = nextY
+                            targetScale = scale
+                            targetOffsetX = offsetX
+                            targetOffsetY = offsetY
                         }
                     }
-                    .pointerInput(Unit) {
-                        awaitPointerEventScope {
-                            while (true) {
-                                val event = awaitPointerEvent()
-                                if (event.type == androidx.compose.ui.input.pointer.PointerEventType.Scroll) {
-                                    if (!addPinMode && viewportSize.width > 0) {
-                                        val cursorPosition = event.changes.first().position
-                                        val rawDelta = event.changes.first().scrollDelta.y
+                }
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            if (event.type == androidx.compose.ui.input.pointer.PointerEventType.Scroll) {
+                                if (!addPinMode && viewportSize.width > 0) {
+                                    val cursorPosition = event.changes.first().position
+                                    val rawDelta = event.changes.first().scrollDelta.y
 
-                                        // If reversing direction mid-flight, reset target to current visible values
-                                        if ((rawDelta > 0 && targetScale > scale) || (rawDelta < 0 && targetScale < scale)) {
-                                            targetScale = scale
-                                            targetOffsetX = offsetX
-                                            targetOffsetY = offsetY
-                                        }
+                                    if ((rawDelta > 0 && targetScale > scale) || (rawDelta < 0 && targetScale < scale)) {
+                                        targetScale = scale
+                                        targetOffsetX = offsetX
+                                        targetOffsetY = offsetY
+                                    }
 
-                                        val absDelta = kotlin.math.abs(rawDelta).coerceIn(0.5f, 5f)
-                                        val factor = if (rawDelta > 0) (1f / 1.18f).pow(absDelta) else 1.18f.pow(absDelta)
-                                        val oldTarget = targetScale
-                                        val newTarget = (targetScale * factor).coerceIn(MIN_MAP_ZOOM, MAX_MAP_ZOOM)
+                                    val absDelta = kotlin.math.abs(rawDelta).coerceIn(0.5f, 5f)
+                                    val factor = if (rawDelta > 0) (1f / 1.18f).pow(absDelta) else 1.18f.pow(absDelta)
+                                    val oldTarget = targetScale
+                                    val newTarget = (targetScale * factor).coerceIn(MIN_MAP_ZOOM, MAX_MAP_ZOOM)
 
-                                        if (newTarget != oldTarget) {
-                                            val actualZoom = newTarget / oldTarget
-                                            val cx = viewportSize.width / 2f
-                                            val cy = viewportSize.height / 2f
-                                            var newTargetX = targetOffsetX + (cursorPosition.x - cx - targetOffsetX) * (1 - actualZoom)
-                                            var newTargetY = targetOffsetY + (cursorPosition.y - cy - targetOffsetY) * (1 - actualZoom)
+                                    if (newTarget != oldTarget) {
+                                        val actualZoom = newTarget / oldTarget
+                                        val cx = viewportSize.width / 2f
+                                        val cy = viewportSize.height / 2f
+                                        var newTargetX = targetOffsetX + (cursorPosition.x - cx - targetOffsetX) * (1 - actualZoom)
+                                        var newTargetY = targetOffsetY + (cursorPosition.y - cy - targetOffsetY) * (1 - actualZoom)
 
-                                            val effectiveW = if (!isEcoMode) tableWidth else baseMapWidth
-                                            val effectiveH = if (!isEcoMode) tableHeight else baseMapHeight
-                                            val maxPanX = (viewportSize.width / 2f) + (effectiveW * newTarget / 2f) - 100f
-                                            val maxPanY = (viewportSize.height / 2f) + (effectiveH * newTarget / 2f) - 100f
-                                            if (maxPanX > 0) newTargetX = newTargetX.coerceIn(-maxPanX, maxPanX)
-                                            if (maxPanY > 0) newTargetY = newTargetY.coerceIn(-maxPanY, maxPanY)
+                                        val effectiveW = if (!isEcoMode) tableWidth else baseMapWidth
+                                        val effectiveH = if (!isEcoMode) tableHeight else baseMapHeight
+                                        val maxPanX = (viewportSize.width / 2f) + (effectiveW * newTarget / 2f) - 100f
+                                        val maxPanY = (viewportSize.height / 2f) + (effectiveH * newTarget / 2f) - 100f
+                                        if (maxPanX > 0) newTargetX = newTargetX.coerceIn(-maxPanX, maxPanX)
+                                        if (maxPanY > 0) newTargetY = newTargetY.coerceIn(-maxPanY, maxPanY)
 
-                                            targetScale = newTarget
-                                            targetOffsetX = newTargetX
-                                            targetOffsetY = newTargetY
+                                        targetScale = newTarget
+                                        targetOffsetX = newTargetX
+                                        targetOffsetY = newTargetY
 
-                                            zoomJob?.cancel()
-                                            zoomJob = coroutineScope.launch {
-                                                val startScale = scale
-                                                val startX = offsetX
-                                                val startY = offsetY
-                                                val anim = Animatable(0f)
-                                                anim.animateTo(
-                                                    targetValue = 1f,
-                                                    animationSpec = tween(durationMillis = 140, easing = FastOutSlowInEasing)
-                                                ) {
-                                                    scale = startScale + (targetScale - startScale) * value
-                                                    offsetX = startX + (targetOffsetX - startX) * value
-                                                    offsetY = startY + (targetOffsetY - startY) * value
-                                                }
+                                        zoomJob?.cancel()
+                                        zoomJob = coroutineScope.launch {
+                                            val startScale = scale
+                                            val startX = offsetX
+                                            val startY = offsetY
+                                            val anim = Animatable(0f)
+                                            anim.animateTo(
+                                                targetValue = 1f,
+                                                animationSpec = tween(durationMillis = 140, easing = FastOutSlowInEasing)
+                                            ) {
+                                                scale = startScale + (targetScale - startScale) * value
+                                                offsetX = startX + (targetOffsetX - startX) * value
+                                                offsetY = startY + (targetOffsetY - startY) * value
                                             }
                                         }
-                                        event.changes.forEach { it.consume() }
                                     }
+                                    event.changes.forEach { it.consume() }
                                 }
                             }
                         }
                     }
+                }
+        ) {
+            // Grand War Table (Normal) or Pure Map Frame (Battery Saver)
+            // Uses graphicsLayer lambda block for 0 recomposition during pan & zoom
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        translationX = offsetX
+                        translationY = offsetY
+                    }
+                    .size(
+                        if (!isEcoMode) tableWidthDp else baseMapWidthDp,
+                        if (!isEcoMode) tableHeightDp else baseMapHeightDp
+                    )
             ) {
-                // Grand War Table (Normal) or Pure Map Frame (Battery Saver)
+                if (!isEcoMode) {
+                    // 0. Fur Pelt Rug on stone floor peeking out from under the table
+                    TabletopFurPelt(
+                        tableWidth = tableWidthDp,
+                        tableHeight = tableHeightDp
+                    )
+
+                    // 1. Realistic Deep Table Drop Shadow on Chamber Stone Floor (Hardware Accelerated)
+                    RealisticTableDropShadow(
+                        shape = RoundedCornerShape(10.dp)
+                    )
+
+                    // 2. Grand War Table Surface (Cropped pure wood & carved border)
+                    Image(
+                        painter = painterResource(Res.drawable.tabletop_hero),
+                        contentDescription = "Grand War Table",
+                        contentScale = ContentScale.FillBounds,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(10.dp))
+                    )
+                }
+
+                // 3. Map Parchment & Accents Container
                 Box(
                     modifier = Modifier
                         .align(Alignment.Center)
-                        .graphicsLayer(
-                            scaleX = scale,
-                            scaleY = scale,
-                            translationX = offsetX,
-                            translationY = offsetY
-                        )
-                        .size(
-                            if (!isEcoMode) tableWidthDp else baseMapWidthDp,
-                            if (!isEcoMode) tableHeightDp else baseMapHeightDp
+                        .size(baseMapWidthDp, baseMapHeightDp)
+                        .then(
+                            if (isEcoMode) {
+                                Modifier
+                                    .background(GrimoireColors.SurfaceCard, RoundedCornerShape(6.dp))
+                                    .border(BorderStroke(1.dp, GrimoireColors.BorderBronze), RoundedCornerShape(6.dp))
+                            } else Modifier
                         )
                 ) {
                     if (!isEcoMode) {
-                        // 0. Fur Pelt Rug on stone floor peeking out from under the table
-                        TabletopFurPelt(
-                            tableWidth = tableWidthDp,
-                            tableHeight = tableHeightDp
+                        // 0. Tabletop Props on the wood desk (Dice, Coins, Quill)
+                        TabletopPropsDeskLayer(
+                            mapWidth = baseMapWidthDp,
+                            mapHeight = baseMapHeightDp
                         )
 
-                        // 1. Realistic Deep Table Drop Shadow on Chamber Stone Floor
-                        RealisticTableDropShadow(
-                            shape = RoundedCornerShape(10.dp)
-                        )
-
-                        // 2. Grand War Table Surface (Cropped pure wood & carved border)
-                        Image(
-                            painter = painterResource(Res.drawable.tabletop_hero),
-                            contentDescription = "Grand War Table",
-                            contentScale = ContentScale.FillBounds,
+                        // 1. Soft Parchment Drop Shadow on the wooden desk
+                        Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .clip(RoundedCornerShape(10.dp))
+                                .graphicsLayer {
+                                    shadowElevation = 18.dp.toPx()
+                                    shape = RoundedCornerShape(8.dp)
+                                    clip = false
+                                }
                         )
                     }
 
-                    // 3. Map Parchment & Accents Container
+                    // 2. High-Performance LOD & Sector Map Canvas
                     Box(
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .size(baseMapWidthDp, baseMapHeightDp)
-                            .then(
-                                if (isEcoMode) {
-                                    Modifier
-                                        .background(GrimoireColors.SurfaceCard, RoundedCornerShape(6.dp))
-                                        .border(BorderStroke(1.dp, GrimoireColors.BorderBronze), RoundedCornerShape(6.dp))
-                                } else Modifier
-                            )
-                    ) {
-                        if (!isEcoMode) {
-                            // 0. Tabletop Props on the wood desk (Dice, Coins, Quill)
-                            TabletopPropsDeskLayer(
-                                mapWidth = baseMapWidthDp,
-                                mapHeight = baseMapHeightDp
-                            )
-
-                            // 1. Soft Parchment Drop Shadow on the wooden desk
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .graphicsLayer {
-                                        shadowElevation = 18.dp.toPx()
-                                        shape = RoundedCornerShape(8.dp)
-                                        clip = false
-                                    }
-                            )
-                        }
-
-                    // 2. Crisp Parchment Map Image
-                    Image(
-                        bitmap = imageBitmap!!, 
-                        contentDescription = "Map",
                         modifier = Modifier
                             .fillMaxSize()
                             .clip(RoundedCornerShape(8.dp))
-                            .pointerInput(addPinMode) {
-                            awaitPointerEventScope {
-                                while (true) {
-                                    val event = awaitPointerEvent()
-                                    if (addPinMode && event.type == androidx.compose.ui.input.pointer.PointerEventType.Press) {
-                                        val position = event.changes.first().position
-                                        val x = (position.x / baseMapWidth).coerceIn(0f, 1f)
-                                        val y = (position.y / baseMapHeight).coerceIn(0f, 1f)
-                                        
-                                        val newMarker = MapMarker(
-                                            id = UUID.randomUUID().toString(),
-                                            x = x,
-                                            y = y,
-                                            isEntityLinked = false
-                                        )
-                                        showMarkerDialog = newMarker
-                                        addPinMode = false
+                    ) {
+                        TiledMapCanvas(
+                            tileState = tileState,
+                            mapWidthPx = baseMapWidth,
+                            mapHeightPx = baseMapHeight,
+                            scaleProvider = { scale },
+                            offsetProvider = { androidx.compose.ui.geometry.Offset(offsetX, offsetY) },
+                            viewportSize = viewportSize,
+                            modifier = Modifier.fillMaxSize()
+                        )
+
+                        if (addPinMode) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .pointerInput(Unit) {
+                                        awaitPointerEventScope {
+                                            while (true) {
+                                                val event = awaitPointerEvent()
+                                                if (event.type == androidx.compose.ui.input.pointer.PointerEventType.Press) {
+                                                    val position = event.changes.first().position
+                                                    val x = (position.x / baseMapWidth).coerceIn(0f, 1f)
+                                                    val y = (position.y / baseMapHeight).coerceIn(0f, 1f)
+
+                                                    val newMarker = MapMarker(
+                                                        id = UUID.randomUUID().toString(),
+                                                        x = x,
+                                                        y = y,
+                                                        isEntityLinked = false
+                                                    )
+                                                    showMarkerDialog = newMarker
+                                                    addPinMode = false
+                                                    event.changes.forEach { it.consume() }
+                                                }
+                                            }
+                                        }
                                     }
-                                }
-                            }
+                            )
                         }
-                    )
+                    }
 
                     if (!isEcoMode) {
                         // Tabletop Accents holding down the parchment map (Compass, Wax Seal)
@@ -407,167 +418,80 @@ fun MapViewer(
                         )
                     }
 
-                    // Render markers
-                    visibleMarkers.forEach { marker ->
-                        val pxX = marker.x * baseMapWidth
-                        val pxY = marker.y * baseMapHeight
-
-                        var rightClickMenuOpened by remember { mutableStateOf(false) }
-                        
-                        var markerColor = Color.Red
-                        if (marker.isEntityLinked && marker.entityId != null) {
-                            val ent = projectEnts.find { it.id == marker.entityId } ?: globalEnts.find { it.id == marker.entityId }
-                            if (ent?.color != null) {
-                                try { markerColor = Color(ent.color.toULong()) } catch(e: Exception) {}
-                            }
-                        } else if (marker.colorULong != null) {
-                            try { markerColor = Color(marker.colorULong.toULong()) } catch(e: Exception) {}
-                        }
-                        
-                        // Adaptive scale multiplier: gently dampens pin scaling (~18.5dp at min zoom to ~31.2dp at max zoom)
-                        val markerAdaptiveScale = (scale.pow(-0.85f)).coerceIn(0.02f, 2.0f)
-
-                        Box(
-                            modifier = Modifier
-                                .offset(
-                                    x = with(androidx.compose.ui.platform.LocalDensity.current) { pxX.toDp() } - 12.dp,
-                                    y = with(androidx.compose.ui.platform.LocalDensity.current) { pxY.toDp() } - 12.dp
-                                )
-                                .size(24.dp)
-                                .graphicsLayer {
-                                    scaleX = markerAdaptiveScale
-                                    scaleY = markerAdaptiveScale
-                                }
-                                .pointerInput(marker) {
-                                    awaitPointerEventScope {
-                                        while (true) {
-                                            val event = awaitPointerEvent()
-                                            if (event.type == androidx.compose.ui.input.pointer.PointerEventType.Press) {
-                                                if (event.buttons.isSecondaryPressed) {
-                                                    rightClickMenuOpened = true
-                                                    event.changes.forEach { it.consume() }
-                                                } else if (event.buttons.isPrimaryPressed) {
-                                                    if (marker.isEntityLinked && marker.entityId != null) {
-                                                        val ent = projectEnts.find { it.id == marker.entityId } ?: globalEnts.find { it.id == marker.entityId }
-                                                        if (ent != null) {
-                                                            onOpenEntityPopout(ent.name)
-                                                        }
-                                                    } else {
-                                                        showMarkerDialog = marker
-                                                    }
-                                                    event.changes.forEach { it.consume() }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                        ) {
-                            var isHovered by remember { mutableStateOf(false) }
-                            Box(modifier = Modifier.fillMaxSize().pointerInput(Unit) {
-                                awaitPointerEventScope {
-                                    while (true) {
-                                        val event = awaitPointerEvent()
-                                        if (event.type == androidx.compose.ui.input.pointer.PointerEventType.Enter) isHovered = true
-                                        else if (event.type == androidx.compose.ui.input.pointer.PointerEventType.Exit) isHovered = false
-                                    }
-                                }
-                            }) {
-                                if (marker.iconFileName != null) {
-                                    val iconFile = File(File(System.getProperty("user.home"), ".dungeon-master-manager/.global/Icons"), marker.iconFileName!!)
-                                    if (iconFile.exists()) {
-                                        ThumbnailImage(file = iconFile, modifier = Modifier.fillMaxSize().clip(MaterialTheme.shapes.small))
-                                    } else {
-                                        Box(modifier = Modifier.fillMaxSize().background(markerColor, shape = CircleShape))
-                                    }
-                                } else {
-                                    Box(modifier = Modifier.fillMaxSize().background(markerColor, shape = CircleShape))
-                                }
-                            }
-                            
-                            if (isHovered) {
-                                val ent = if (marker.isEntityLinked && marker.entityId != null) {
-                                    projectEnts.find { it.id == marker.entityId } ?: globalEnts.find { it.id == marker.entityId }
-                                } else null
-                                val labelText = if (marker.isEntityLinked) ent?.name else marker.title
-                                if (!labelText.isNullOrBlank()) {
-                                    Surface(
-                                        modifier = Modifier
-                                            .offset(x = 24.dp, y = (-12).dp)
-                                            .wrapContentSize(unbounded = true)
-                                            .widthIn(max = 150.dp),
-                                        color = MaterialTheme.colorScheme.surfaceVariant,
-                                        shape = MaterialTheme.shapes.small
-                                    ) {
-                                        Text(labelText, modifier = Modifier.padding(4.dp), style = MaterialTheme.typography.labelSmall)
-                                    }
-                                }
-                            }
-
-                            DropdownMenu(
-                                expanded = rightClickMenuOpened,
-                                onDismissRequest = { rightClickMenuOpened = false }
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text("Edit") },
-                                    onClick = {
-                                        rightClickMenuOpened = false
-                                        showMarkerDialog = marker
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Delete") },
-                                    onClick = {
-                                        rightClickMenuOpened = false
-                                        mapData = mapData.copy(markers = mapData.markers.filter { it.id != marker.id })
-                                        saveMap()
-                                    }
-                                )
-                                if(marker.isEntityLinked && marker.entityId != null) {
-                                    val ent = projectEnts.find { it.id == marker.entityId } ?: globalEnts.find { it.id == marker.entityId }
-                                    if (ent != null) {
-                                        DropdownMenuItem(
-                                            text = { Text("Open entity") },
-                                            onClick = {
-                                                rightClickMenuOpened = false
-                                                onOpenEntityPopout(ent.name)
-                                            }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    // 3. Batched Markers Overlay Canvas
+                    MapMarkersCanvas(
+                        markers = visibleMarkers,
+                        projectEntities = projectEnts,
+                        globalEntities = globalEnts,
+                        mapWidthPx = baseMapWidth,
+                        mapHeightPx = baseMapHeight,
+                        scaleProvider = { scale },
+                        onOpenEntityPopout = onOpenEntityPopout,
+                        onEditMarker = { showMarkerDialog = it },
+                        onDeleteMarker = { markerToDelete ->
+                            mapData = mapData.copy(markers = mapData.markers.filter { it.id != markerToDelete.id })
+                            saveMap()
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
             }
         }
-            
-            if (showMarkerDialog != null) {
-                MapMarkerDialog(
-                    initialMarker = showMarkerDialog!!,
-                    projectEntities = projectEnts,
-                    globalEntities = globalEnts,
-                    onDismiss = { showMarkerDialog = null },
-                    onSave = { updatedMarker ->
-                        val existingIndex = mapData.markers.indexOfFirst { it.id == updatedMarker.id }
-                        val newMarkers = mapData.markers.toMutableList()
-                        if (existingIndex >= 0) {
-                            newMarkers[existingIndex] = updatedMarker
-                        } else {
-                            newMarkers.add(updatedMarker)
-                        }
-                        mapData = mapData.copy(markers = newMarkers)
-                        saveMap()
-                        showMarkerDialog = null
-                    },
-                    onDelete = { markerToDelete ->
-                        mapData = mapData.copy(markers = mapData.markers.filter { it.id != markerToDelete.id })
-                        saveMap()
-                        showMarkerDialog = null
+
+        // Marker Dialog
+        if (showMarkerDialog != null) {
+            MapMarkerDialog(
+                initialMarker = showMarkerDialog!!,
+                projectEntities = projectEnts,
+                globalEntities = globalEnts,
+                onDismiss = { showMarkerDialog = null },
+                onSave = { updatedMarker ->
+                    val existingIndex = mapData.markers.indexOfFirst { it.id == updatedMarker.id }
+                    val newMarkers = mapData.markers.toMutableList()
+                    if (existingIndex >= 0) {
+                        newMarkers[existingIndex] = updatedMarker
+                    } else {
+                        newMarkers.add(updatedMarker)
                     }
-                )
+                    mapData = mapData.copy(markers = newMarkers)
+                    saveMap()
+                    showMarkerDialog = null
+                },
+                onDelete = { markerToDelete ->
+                    mapData = mapData.copy(markers = mapData.markers.filter { it.id != markerToDelete.id })
+                    saveMap()
+                    showMarkerDialog = null
+                }
+            )
+        }
+
+        // Background sector generation badge
+        if (tileState.isGenerating) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f),
+                shape = MaterialTheme.shapes.small,
+                border = BorderStroke(1.dp, GrimoireColors.BorderBronze)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                        color = GrimoireColors.GoldPrimary
+                    )
+                    Text(
+                        "Optimiere Kartensektoren… ${(tileState.generationProgress * 100).toInt()}%",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
-
-
         }
 
         // Toolbar
@@ -637,7 +561,12 @@ fun MapViewer(
                         }
                     }
                 }) { Text("-") }
-                Button(onClick = { addPinMode = !addPinMode }, colors = ButtonDefaults.buttonColors(containerColor = if (addPinMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary)) {
+                Button(
+                    onClick = { addPinMode = !addPinMode },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (addPinMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
+                    )
+                ) {
                     Text(if (addPinMode) "Click Map to Place" else "Add Pin")
                 }
             }
@@ -649,12 +578,15 @@ fun MapViewer(
 fun ImageSelector(projectPath: String, onSelect: (String) -> Unit) {
     var images by remember { mutableStateOf<List<File>>(emptyList()) }
     LaunchedEffect(projectPath) {
-        val root = File(projectPath)
-        images = root.walkTopDown()
-            .filter { it.isFile && (it.extension.lowercase() in listOf("png", "jpg", "jpeg", "webp")) }
-            .toList()
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val root = File(projectPath)
+            images = root.walkTopDown()
+                .onEnter { it == root || !it.name.startsWith(".") }
+                .filter { it.isFile && (it.extension.lowercase() in listOf("png", "jpg", "jpeg", "webp")) }
+                .toList()
+        }
     }
-    
+
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Card(modifier = Modifier.fillMaxWidth(0.8f).fillMaxHeight(0.8f)) {
             Column(modifier = Modifier.padding(16.dp)) {
@@ -687,24 +619,16 @@ fun ImageSelector(projectPath: String, onSelect: (String) -> Unit) {
 
 @Composable
 fun ThumbnailImage(file: File, modifier: Modifier = Modifier) {
-    var bitmap by remember(file.absolutePath) { mutableStateOf<ImageBitmap?>(null) }
-    
-    LaunchedEffect(file.absolutePath) {
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            try {
-                file.inputStream().use {
-                    bitmap = androidx.compose.ui.res.loadImageBitmap(it)
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
+    var bitmap by remember(file.absolutePath, file.lastModified()) { mutableStateOf<ImageBitmap?>(null) }
+
+    LaunchedEffect(file.absolutePath, file.lastModified()) {
+        bitmap = MarkerIconCache.getThumbnail(file, 128)
     }
-    
+
     if (bitmap != null) {
         Image(
-            bitmap = bitmap!!, 
-            contentDescription = null, 
+            bitmap = bitmap!!,
+            contentDescription = null,
             modifier = modifier,
             contentScale = androidx.compose.ui.layout.ContentScale.Crop
         )
@@ -714,7 +638,6 @@ fun ThumbnailImage(file: File, modifier: Modifier = Modifier) {
         }
     }
 }
-
 
 @Composable
 fun MapMarkerDialog(
@@ -726,12 +649,12 @@ fun MapMarkerDialog(
     onDelete: (MapMarker) -> Unit
 ) {
     var isEntityLinked by remember { mutableStateOf(initialMarker.isEntityLinked) }
-    
+
     // Find initial entity to display its name
     val initEnt = if (initialMarker.entityId != null) {
         projectEntities.find { it.id == initialMarker.entityId } ?: globalEntities.find { it.id == initialMarker.entityId }
     } else null
-    
+
     var entitySearch by remember { mutableStateOf(initEnt?.name ?: "") }
     var selectedEntityId by remember { mutableStateOf(initialMarker.entityId) }
     var title by remember { mutableStateOf(initialMarker.title ?: "") }
@@ -741,7 +664,7 @@ fun MapMarkerDialog(
         initialMarker.colorULong ?: Color.random().value.toString()
         )
     }
-    
+
     AlertDialog(
         onDismissRequest = onDismissRequest@{ onDismiss() },
         title = { Text(if (initialMarker.title.isNullOrBlank() && initialMarker.entityId.isNullOrBlank()) "New Map Marker" else "Edit Marker") },
@@ -751,22 +674,21 @@ fun MapMarkerDialog(
                     Checkbox(checked = isEntityLinked, onCheckedChange = { isEntityLinked = it })
                     Text("Link to Entity")
                 }
-                
+
                 if (isEntityLinked) {
                     var expanded by remember { mutableStateOf(false) }
                     val allEntities = remember(projectEntities, globalEntities) { projectEntities + globalEntities }
                     val filteredEntities = remember(entitySearch, allEntities) {
-                        if (entitySearch.isBlank()) allEntities 
+                        if (entitySearch.isBlank()) allEntities
                         else allEntities.filter { it.name.contains(entitySearch, ignoreCase = true) }
                     }
-                    
+
                     Box {
                         OutlinedTextField(
                             value = entitySearch,
-                            onValueChange = { 
-                                entitySearch = it 
+                            onValueChange = {
+                                entitySearch = it
                                 expanded = true
-                                // If they type and it doesn't match exactly, we clear the ID so they have to select one
                                 val perfectMatch = allEntities.find { e -> e.name.equals(it, ignoreCase = true) }
                                 selectedEntityId = perfectMatch?.id
                             },
@@ -813,7 +735,7 @@ fun MapMarkerDialog(
                     )
                 }
 
-                if(!isEntityLinked) {
+                if (!isEntityLinked) {
                     Spacer(Modifier.height(16.dp))
                     Text("Marker Icon", style = MaterialTheme.typography.labelLarge)
                     Spacer(Modifier.height(8.dp))
@@ -830,7 +752,6 @@ fun MapMarkerDialog(
                     val showColorPicker = remember { mutableStateOf(false) }
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         item {
-                            // Use only color
                             val parsedColor = try {
                                 Color(color.toULong())
                             } catch (e: Exception) {
@@ -846,7 +767,6 @@ fun MapMarkerDialog(
                             )
                         }
 
-                        // Use icon
                         items(availableIcons) { iconFile ->
                             Box(
                                 modifier = Modifier

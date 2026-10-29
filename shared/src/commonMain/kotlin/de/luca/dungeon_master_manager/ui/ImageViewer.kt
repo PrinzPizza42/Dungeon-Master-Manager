@@ -12,12 +12,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.res.loadImageBitmap
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -25,18 +23,18 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.FastOutSlowInEasing
 import kotlin.math.pow
-import kotlin.math.abs
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
-import javax.imageio.ImageIO
+import de.luca.dungeon_master_manager.ui.map.*
+import de.luca.dungeon_master_manager.ui.theme.GrimoireColors
 
 /**
  * Interactive image viewer supporting zoom (mouse wheel + buttons), pan/drag,
- * fit-to-screen, 1:1 original size, and file information.
+ * fit-to-screen, 1:1 original size, and file information with high performance LOD & tile rendering.
  */
 private const val MIN_IMAGE_ZOOM = 0.05f
 private const val MAX_IMAGE_ZOOM = 50.0f
@@ -46,10 +44,8 @@ fun ImageViewer(
     filePath: String,
     fileName: String,
     modifier: Modifier = Modifier,
+    projectPath: String = ""
 ) {
-    var imageBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
-    var isLoading by remember { mutableStateOf(true) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
     var fileSizeString by remember { mutableStateOf("") }
     var reloadTrigger by remember { mutableStateOf(0) }
 
@@ -64,61 +60,38 @@ fun ImageViewer(
     val coroutineScope = rememberCoroutineScope()
     var zoomJob by remember { mutableStateOf<Job?>(null) }
 
+    val file = remember(filePath) { File(filePath) }
+
     LaunchedEffect(filePath, reloadTrigger) {
-        isLoading = true
-        errorMessage = null
         hasAutoFitted = false
         withContext(Dispatchers.IO) {
-            val file = File(filePath)
-            if (!file.exists()) {
-                errorMessage = "File not found: $filePath"
-                isLoading = false
-                return@withContext
-            }
-
-            val bytes = file.length()
-            fileSizeString = when {
-                bytes < 1024 -> "$bytes B"
-                bytes < 1024 * 1024 -> String.format(Locale.US, "%.1f KB", bytes / 1024.0)
-                else -> String.format(Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0))
-            }
-
-            var loaded: ImageBitmap? = null
-            try {
-                file.inputStream().use {
-                    loaded = loadImageBitmap(it)
-                }
-            } catch (e: Exception) {
-                // Fallback to Java ImageIO
-                try {
-                    val bufferedImage = ImageIO.read(file)
-                    if (bufferedImage != null) {
-                        loaded = bufferedImage.toComposeImageBitmap()
-                    }
-                } catch (e2: Exception) {
-                    errorMessage = "Failed to load image: ${e.message}"
+            if (file.exists()) {
+                val bytes = file.length()
+                fileSizeString = when {
+                    bytes < 1024 -> "$bytes B"
+                    bytes < 1024 * 1024 -> String.format(Locale.US, "%.1f KB", bytes / 1024.0)
+                    else -> String.format(Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0))
                 }
             }
-
-            if (loaded != null) {
-                imageBitmap = loaded
-                errorMessage = null
-            } else if (errorMessage == null) {
-                errorMessage = "Unable to decode image format."
-            }
-            isLoading = false
         }
     }
 
-    fun fitToScreen(bitmap: ImageBitmap, viewSize: IntSize, animate: Boolean = false) {
-        if (viewSize.width <= 0 || viewSize.height <= 0) return
+    val tileState by remember(filePath, projectPath, reloadTrigger) {
+        MapTileCacheManager.getOrLoadState(projectPath, file, coroutineScope)
+    }.collectAsState()
+
+    val origW = tileState.manifest?.originalWidth ?: tileState.lod0Bitmap?.width ?: 1
+    val origH = tileState.manifest?.originalHeight ?: tileState.lod0Bitmap?.height ?: 1
+
+    fun fitToScreen(w: Int, h: Int, viewSize: IntSize, animate: Boolean = false) {
+        if (viewSize.width <= 0 || viewSize.height <= 0 || w <= 0 || h <= 0) return
         val padding = 48f
         val availW = (viewSize.width - padding).coerceAtLeast(20f)
         val availH = (viewSize.height - padding).coerceAtLeast(20f)
-        val scaleW = availW / bitmap.width
-        val scaleH = availH / bitmap.height
+        val scaleW = availW / w.toFloat()
+        val scaleH = availH / h.toFloat()
         val fitScale = minOf(scaleW, scaleH)
-        val target = if (bitmap.width <= availW && bitmap.height <= availH) 1f else fitScale.coerceIn(MIN_IMAGE_ZOOM, MAX_IMAGE_ZOOM)
+        val target = if (w <= availW && h <= availH) 1f else fitScale.coerceIn(MIN_IMAGE_ZOOM, MAX_IMAGE_ZOOM)
         targetScale = target
         targetOffsetX = 0f
         targetOffsetY = 0f
@@ -142,11 +115,10 @@ fun ImageViewer(
         }
     }
 
-    // Auto-fit on first load once viewport size and bitmap are available
-    LaunchedEffect(imageBitmap, viewportSize) {
-        val bmp = imageBitmap
-        if (bmp != null && viewportSize.width > 0 && !hasAutoFitted) {
-            fitToScreen(bmp, viewportSize)
+    // Auto-fit on first load once viewport size and image dimensions are available
+    LaunchedEffect(tileState.lod0Bitmap, viewportSize) {
+        if (tileState.lod0Bitmap != null && viewportSize.width > 0 && !hasAutoFitted) {
+            fitToScreen(origW, origH, viewportSize)
             hasAutoFitted = true
         }
     }
@@ -169,10 +141,10 @@ fun ImageViewer(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
 
-                if (imageBitmap != null) {
+                if (tileState.lod0Bitmap != null) {
                     Spacer(Modifier.width(16.dp))
                     Text(
-                        "${imageBitmap!!.width} × ${imageBitmap!!.height} px",
+                        "$origW × $origH px",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -182,11 +154,23 @@ fun ImageViewer(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+
+                    if (tileState.isGenerating) {
+                        Spacer(Modifier.width(16.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 2.dp, color = GrimoireColors.GoldPrimary)
+                            Text(
+                                "Optimiere Sektoren… ${(tileState.generationProgress * 100).toInt()}%",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.weight(1f))
 
-                if (imageBitmap != null) {
+                if (tileState.lod0Bitmap != null) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -312,7 +296,7 @@ fun ImageViewer(
                         // Fit to screen
                         OutlinedButton(
                             onClick = {
-                                imageBitmap?.let { fitToScreen(it, viewportSize, animate = true) }
+                                fitToScreen(origW, origH, viewportSize, animate = true)
                             },
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                             modifier = Modifier.height(30.dp)
@@ -359,33 +343,26 @@ fun ImageViewer(
                 .onSizeChanged { viewportSize = it }
         ) {
             when {
-                isLoading -> {
+                !file.exists() -> {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            "File not found: $filePath",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+
+                tileState.lod0Bitmap == null -> {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(modifier = Modifier.size(36.dp))
                     }
                 }
 
-                errorMessage != null -> {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                errorMessage!!,
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                            Spacer(Modifier.height(12.dp))
-                            Button(onClick = { reloadTrigger++ }) {
-                                Text("Retry")
-                            }
-                        }
-                    }
-                }
-
-                imageBitmap != null -> {
-                    val bitmap = imageBitmap!!
+                else -> {
                     val density = LocalDensity.current
-                    val imageWidthDp = with(density) { bitmap.width.toDp() }
-                    val imageHeightDp = with(density) { bitmap.height.toDp() }
+                    val imageWidthDp = with(density) { origW.toFloat().toDp() }
+                    val imageHeightDp = with(density) { origH.toFloat().toDp() }
 
                     Box(
                         modifier = Modifier
@@ -393,7 +370,7 @@ fun ImageViewer(
                             .pointerInput(Unit) {
                                 detectTransformGestures { _, pan, _, _ ->
                                     if (viewportSize.width > 0) {
-                                        zoomJob?.cancel() // Cancel ongoing zoom animation immediately on drag
+                                        zoomJob?.cancel()
                                         offsetX += pan.x
                                         offsetY += pan.y
                                         targetScale = scale
@@ -410,7 +387,6 @@ fun ImageViewer(
                                             val cursorPosition = event.changes.first().position
                                             val rawDelta = event.changes.first().scrollDelta.y
 
-                                            // If reversing direction mid-flight, reset target to current visible values
                                             if ((rawDelta > 0 && targetScale > scale) || (rawDelta < 0 && targetScale < scale)) {
                                                 targetScale = scale
                                                 targetOffsetX = offsetX
@@ -455,18 +431,22 @@ fun ImageViewer(
                         Box(
                             modifier = Modifier
                                 .align(Alignment.Center)
-                                .graphicsLayer(
-                                    scaleX = scale,
-                                    scaleY = scale,
-                                    translationX = offsetX,
+                                .graphicsLayer {
+                                    scaleX = scale
+                                    scaleY = scale
+                                    translationX = offsetX
                                     translationY = offsetY
-                                )
+                                }
                                 .requiredSize(imageWidthDp, imageHeightDp)
                                 .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                         ) {
-                            Image(
-                                bitmap = bitmap,
-                                contentDescription = fileName,
+                            TiledMapCanvas(
+                                tileState = tileState,
+                                mapWidthPx = origW.toFloat(),
+                                mapHeightPx = origH.toFloat(),
+                                scaleProvider = { scale },
+                                offsetProvider = { androidx.compose.ui.geometry.Offset(offsetX, offsetY) },
+                                viewportSize = viewportSize,
                                 modifier = Modifier.fillMaxSize()
                             )
                         }

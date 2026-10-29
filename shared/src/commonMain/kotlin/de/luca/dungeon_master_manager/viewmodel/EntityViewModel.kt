@@ -108,7 +108,9 @@ class EntityViewModel(private val projectPath: String?, private val viewModel: P
 
         for (dir in projectDirs) {
             if (!dir.exists()) continue
-            val mapFiles = dir.walkTopDown().filter { it.isFile && it.extension == "map" && !it.name.startsWith(".") }
+            val mapFiles = dir.walkTopDown()
+                .onEnter { it == dir || !it.name.startsWith(".") }
+                .filter { it.isFile && it.extension == "map" && !it.name.startsWith(".") }
             for (mapFile in mapFiles) {
                 try {
                     val text = mapFile.readText()
@@ -214,6 +216,7 @@ class EntityViewModel(private val projectPath: String?, private val viewModel: P
 
         val rootAbsPath = rootPath.absolutePath
         val allMdFiles = rootPath.walkTopDown()
+            .onEnter { it == rootPath || !it.name.startsWith(".") }
             .filter { it.isFile && it.extension.equals("md", ignoreCase = true) }
             .map { it.absolutePath.removePrefix(rootAbsPath).removePrefix(File.separator) }
             .toList()

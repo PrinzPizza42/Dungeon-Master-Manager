@@ -10,7 +10,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
@@ -32,7 +34,6 @@ import dungeon_master_manager.shared.generated.resources.prop_seal
 import dungeon_master_manager.shared.generated.resources.prop_fur_pelt
 import androidx.compose.animation.core.*
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.draw.blur
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.unit.IntOffset
@@ -54,7 +55,9 @@ fun Modifier.tiledTexture(
     blendMode: BlendMode = BlendMode.SrcOver,
     panOffset: Offset = Offset.Zero,
     zoomScale: Float = 1.0f,
-    baseTextureScale: Float = 1.0f
+    baseTextureScale: Float = 1.0f,
+    panOffsetProvider: (() -> Offset)? = null,
+    zoomScaleProvider: (() -> Float)? = null
 ): Modifier {
     val imageBitmap = imageResource(resource)
     val brush = remember(imageBitmap) {
@@ -65,16 +68,18 @@ fun Modifier.tiledTexture(
         Modifier.drawWithContent {
             val cx = size.width / 2f
             val cy = size.height / 2f
-            val safeScale = (zoomScale * baseTextureScale).coerceAtLeast(0.05f)
+            val currentPan = panOffsetProvider?.invoke() ?: panOffset
+            val currentScale = zoomScaleProvider?.invoke() ?: zoomScale
+            val safeScale = (currentScale * baseTextureScale).coerceAtLeast(0.05f)
 
             withTransform({
-                translate(left = panOffset.x, top = panOffset.y)
+                translate(left = currentPan.x, top = currentPan.y)
                 scale(scaleX = safeScale, scaleY = safeScale, pivot = Offset(cx, cy))
             }) {
-                val invLeft = (0f - cx - panOffset.x) / safeScale + cx
-                val invTop = (0f - cy - panOffset.y) / safeScale + cy
-                val invRight = (size.width - cx - panOffset.x) / safeScale + cx
-                val invBottom = (size.height - cy - panOffset.y) / safeScale + cy
+                val invLeft = (0f - cx - currentPan.x) / safeScale + cx
+                val invTop = (0f - cy - currentPan.y) / safeScale + cy
+                val invRight = (size.width - cx - currentPan.x) / safeScale + cx
+                val invBottom = (size.height - cy - currentPan.y) / safeScale + cy
 
                 drawRect(
                     brush = brush,
@@ -97,15 +102,23 @@ fun GrimoireDeskSurface(
     modifier: Modifier = Modifier,
     panOffset: Offset = Offset.Zero,
     zoomScale: Float = 1.0f,
+    panOffsetProvider: (() -> Offset)? = null,
+    zoomScaleProvider: (() -> Float)? = null,
     content: @Composable BoxScope.() -> Unit = {}
 ) {
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(GrimoireColors.Background)
-            .tiledTexture(Res.drawable.tabletop_dark, alpha = 0.85f, panOffset = panOffset, zoomScale = zoomScale)
-            .drawWithContent {
-                // Smooth ambient vignette framing the workspace perimeter naturally without artificial yellow spotlights
+            .tiledTexture(
+                resource = Res.drawable.tabletop_dark,
+                alpha = 0.85f,
+                panOffset = panOffset,
+                zoomScale = zoomScale,
+                panOffsetProvider = panOffsetProvider,
+                zoomScaleProvider = zoomScaleProvider
+            )
+            .drawWithCache {
                 val centerOffset = Offset(size.width / 2f, size.height / 2f)
                 val radius = (size.maxDimension * 0.70f).coerceAtLeast(400f)
                 val ambientVignette = Brush.radialGradient(
@@ -118,8 +131,10 @@ fun GrimoireDeskSurface(
                     center = centerOffset,
                     radius = radius
                 )
-                drawRect(brush = ambientVignette, size = size)
-                drawContent()
+                onDrawWithContent {
+                    drawRect(brush = ambientVignette, size = size)
+                    drawContent()
+                }
             },
         content = content
     )
@@ -133,6 +148,8 @@ fun GrimoireAmbientChamber(
     modifier: Modifier = Modifier,
     panOffset: Offset = Offset.Zero,
     zoomScale: Float = 1.0f,
+    panOffsetProvider: (() -> Offset)? = null,
+    zoomScaleProvider: (() -> Float)? = null,
     content: @Composable BoxScope.() -> Unit = {}
 ) {
     Box(
@@ -144,42 +161,43 @@ fun GrimoireAmbientChamber(
                 alpha = 0.78f,
                 panOffset = panOffset,
                 zoomScale = zoomScale,
+                panOffsetProvider = panOffsetProvider,
+                zoomScaleProvider = zoomScaleProvider,
                 baseTextureScale = 1.7f
             )
-            .drawWithContent {
-                drawContent()
-
+            .drawWithCache {
                 val centerOffset = Offset(size.width / 2f, size.height / 2f)
 
                 // 1. Warm Candlelight Pool (Static atmospheric light, 0% idle GPU load)
                 val candleRadius = (size.minDimension * 0.78f).coerceAtLeast(350f)
-                drawRect(
-                    brush = Brush.radialGradient(
-                        colorStops = arrayOf(
-                            0.0f to Color(0x32FFB74D),
-                            0.35f to Color(0x15FF9800),
-                            0.70f to Color.Transparent
-                        ),
-                        center = centerOffset,
-                        radius = candleRadius
+                val candleBrush = Brush.radialGradient(
+                    colorStops = arrayOf(
+                        0.0f to Color(0x32FFB74D),
+                        0.35f to Color(0x15FF9800),
+                        0.70f to Color.Transparent
                     ),
-                    blendMode = BlendMode.Screen
+                    center = centerOffset,
+                    radius = candleRadius
                 )
 
                 // 2. Chamber Perimeter Vignette
                 val roomRadius = (size.maxDimension * 0.85f).coerceAtLeast(500f)
-                drawRect(
-                    brush = Brush.radialGradient(
-                        colorStops = arrayOf(
-                            0.0f to Color.Transparent,
-                            0.45f to Color(0x250A0807),
-                            0.75f to Color(0x70060504),
-                            1.0f to Color(0xC8040303)
-                        ),
-                        center = centerOffset,
-                        radius = roomRadius
-                    )
+                val roomBrush = Brush.radialGradient(
+                    colorStops = arrayOf(
+                        0.0f to Color.Transparent,
+                        0.45f to Color(0x250A0807),
+                        0.75f to Color(0x70060504),
+                        1.0f to Color(0xC8040303)
+                    ),
+                    center = centerOffset,
+                    radius = roomRadius
                 )
+
+                onDrawWithContent {
+                    drawContent()
+                    drawRect(brush = candleBrush, blendMode = BlendMode.Screen)
+                    drawRect(brush = roomBrush)
+                }
             },
         content = content
     )
@@ -187,27 +205,55 @@ fun GrimoireAmbientChamber(
 
 /**
  * Deep, multi-layered realistic contact drop shadow cast by the heavy oak war table onto the stone floor.
+ * Hardware-accelerated multi-step gradient shadow that eliminates expensive Gaussian blur FBOs.
  */
 @Composable
 fun BoxScope.RealisticTableDropShadow(
     modifier: Modifier = Modifier,
     shape: Shape = RoundedCornerShape(12.dp)
 ) {
-    // Direct contact shadow
     Box(
         modifier = modifier
             .matchParentSize()
-            .offset(x = 6.dp, y = 14.dp)
-            .background(Color(0xCC050403), shape)
-            .blur(16.dp)
-    )
-    // Diffuse ambient occlusion shadow
-    Box(
-        modifier = modifier
-            .matchParentSize()
-            .offset(x = 10.dp, y = 26.dp)
-            .background(Color(0x88040302), shape)
-            .blur(34.dp)
+            .drawWithCache {
+                val cornerRadius = CornerRadius(12.dp.toPx(), 12.dp.toPx())
+                val contactOffsetX = 6.dp.toPx()
+                val contactOffsetY = 14.dp.toPx()
+                val ambientOffsetX = 10.dp.toPx()
+                val ambientOffsetY = 26.dp.toPx()
+
+                onDrawBehind {
+                    // Layer 1: Diffuse Ambient Occlusion Shadow (soft multi-stage outward expansion)
+                    val ambientSteps = 5
+                    val maxAmbientSpread = 28.dp.toPx()
+                    for (i in ambientSteps downTo 1) {
+                        val factor = i.toFloat() / ambientSteps
+                        val spread = maxAmbientSpread * factor
+                        val alpha = (0.07f * (1f - factor * 0.55f))
+                        drawRoundRect(
+                            color = Color(0xFF040302).copy(alpha = alpha),
+                            topLeft = Offset(ambientOffsetX - spread, ambientOffsetY - spread),
+                            size = Size(size.width + spread * 2, size.height + spread * 2),
+                            cornerRadius = CornerRadius(cornerRadius.x + spread, cornerRadius.y + spread)
+                        )
+                    }
+
+                    // Layer 2: Direct Contact Shadow (tighter, darker core)
+                    val contactSteps = 4
+                    val maxContactSpread = 12.dp.toPx()
+                    for (i in contactSteps downTo 1) {
+                        val factor = i.toFloat() / contactSteps
+                        val spread = maxContactSpread * factor
+                        val alpha = (0.16f * (1f - factor * 0.45f))
+                        drawRoundRect(
+                            color = Color(0xFF050403).copy(alpha = alpha),
+                            topLeft = Offset(contactOffsetX - spread, contactOffsetY - spread),
+                            size = Size(size.width + spread * 2, size.height + spread * 2),
+                            cornerRadius = CornerRadius(cornerRadius.x + spread, cornerRadius.y + spread)
+                        )
+                    }
+                }
+            }
     )
 }
 
