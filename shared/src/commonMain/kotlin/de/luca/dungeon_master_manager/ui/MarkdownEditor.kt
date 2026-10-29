@@ -11,6 +11,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
@@ -42,6 +44,7 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.isMetaPressed
 import androidx.compose.ui.input.pointer.onPointerEvent
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
@@ -54,8 +57,10 @@ import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
 import de.luca.dungeon_master_manager.ui.theme.GrimoireColors
 import de.luca.dungeon_master_manager.ui.theme.GrimoireDivider
 import de.luca.dungeon_master_manager.ui.theme.LocalFantasyFontFamily
@@ -285,8 +290,31 @@ private fun MarkdownEdit(
     }
 
     var dropdownQuery by remember { mutableStateOf<String?>(null) }
-    var dropdownStartOffset by remember { mutableStateOf(-1) }
+    var dropdownDismissed by remember { mutableStateOf(false) }
+    var selectedDropdownIndex by remember { mutableIntStateOf(0) }
+    var lastInsideEntityRange by remember { mutableStateOf<IntRange?>(null) }
+    val dropdownListState = rememberLazyListState()
     var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+
+    val displayEntities = remember(dropdownQuery, entities) {
+        val q = dropdownQuery
+        if (q == null) {
+            emptyList()
+        } else if (q.isBlank()) {
+            entities.take(10)
+        } else {
+            entities.filter { it.name.contains(q, ignoreCase = true) }.take(10)
+        }
+    }
+
+    val isDropdownActive = dropdownQuery != null && !dropdownDismissed && displayEntities.isNotEmpty()
+    val clampedSelectedIndex = if (displayEntities.isEmpty()) 0 else selectedDropdownIndex.coerceIn(0, displayEntities.lastIndex)
+
+    LaunchedEffect(clampedSelectedIndex, isDropdownActive) {
+        if (isDropdownActive && displayEntities.isNotEmpty()) {
+            dropdownListState.animateScrollToItem(clampedSelectedIndex)
+        }
+    }
 
     // Sticky-X state for reliable vertical arrow navigation across lines of varying lengths
     var stickyX by remember { mutableStateOf<Float?>(null) }
@@ -318,20 +346,46 @@ private fun MarkdownEdit(
     LaunchedEffect(textFieldValue.text, textFieldValue.selection) {
         val cursor = textFieldValue.selection.start
         if (cursor > 0 && textFieldValue.selection.collapsed) {
-            val textBeforeCursor = textFieldValue.text.substring(0, cursor)
-            val match = Regex(".*@([\\w\\s]*)$").find(textBeforeCursor)
-            if (match != null) {
-                dropdownQuery = match.groups[1]?.value ?: ""
-                dropdownStartOffset = match.range.last - (match.groups[1]?.value?.length ?: 0)
+            val text = textFieldValue.text
+            val insideEntityMatch = ENTITY_MENTION_REGEX.findAll(text).find { match ->
+                cursor in (match.range.first + 1)..match.range.last
+            }
+
+            if (insideEntityMatch != null) {
+                if (dropdownQuery != "" || insideEntityMatch.range != lastInsideEntityRange) {
+                    lastInsideEntityRange = insideEntityMatch.range
+                    dropdownQuery = ""
+                    val currentId = insideEntityMatch.groups[1]?.value
+                    val matchIdx = displayEntities.indexOfFirst { it.id == currentId }
+                    selectedDropdownIndex = if (matchIdx >= 0) matchIdx else 0
+                    dropdownDismissed = false
+                }
             } else {
-                dropdownQuery = null
+                lastInsideEntityRange = null
+                val textBeforeCursor = text.substring(0, cursor)
+                val match = Regex(".*@([\\w\\s]*)$").find(textBeforeCursor)
+                if (match != null) {
+                    val newQuery = match.groups[1]?.value ?: ""
+                    if (newQuery != dropdownQuery) {
+                        dropdownQuery = newQuery
+                        selectedDropdownIndex = 0
+                        dropdownDismissed = false
+                    }
+                } else {
+                    dropdownQuery = null
+                    dropdownDismissed = false
+                    selectedDropdownIndex = 0
+                }
             }
         } else {
+            lastInsideEntityRange = null
             dropdownQuery = null
+            dropdownDismissed = false
+            selectedDropdownIndex = 0
         }
     }
 
-    Box(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .tiledTexture(Res.drawable.grimoire_vellum, alpha = 0.08f)
@@ -420,6 +474,38 @@ private fun MarkdownEdit(
                         val key = keyEvent.key
                         val hasCommandModifier = keyEvent.isCtrlPressed || keyEvent.isAltPressed || keyEvent.isMetaPressed
 
+                        if (isDropdownActive && !hasCommandModifier) {
+                            when (key) {
+                                Key.DirectionDown -> {
+                                    selectedDropdownIndex = (clampedSelectedIndex + 1) % displayEntities.size
+                                    return@onPreviewKeyEvent true
+                                }
+                                Key.DirectionUp -> {
+                                    selectedDropdownIndex = (clampedSelectedIndex - 1 + displayEntities.size) % displayEntities.size
+                                    return@onPreviewKeyEvent true
+                                }
+                                Key.Enter, Key.NumPadEnter, Key.Tab -> {
+                                    val selectedEntity = displayEntities.getOrNull(clampedSelectedIndex)
+                                    if (selectedEntity != null) {
+                                        val (newContent, newSel) = replaceEntityQueryWithLink(
+                                            text = textFieldValue.text,
+                                            cursor = textFieldValue.selection.start,
+                                            query = dropdownQuery ?: "",
+                                            entityId = selectedEntity.id
+                                        )
+                                        dropdownQuery = null
+                                        dropdownDismissed = false
+                                        onValueChange(TextFieldValue(newContent, newSel))
+                                        return@onPreviewKeyEvent true
+                                    }
+                                }
+                                Key.Escape -> {
+                                    dropdownDismissed = true
+                                    return@onPreviewKeyEvent true
+                                }
+                            }
+                        }
+
                         if (!hasCommandModifier && (key == Key.DirectionUp || key == Key.DirectionDown)) {
                             val layout = textLayoutResult ?: return@onPreviewKeyEvent false
                             val direction = if (key == Key.DirectionUp) -1 else 1
@@ -473,44 +559,74 @@ private fun MarkdownEdit(
             )
         }
 
-        if (dropdownQuery != null) {
-            val query = dropdownQuery!!
-            val filtered = if (query.isBlank()) entities else entities.filter { it.name.contains(query, ignoreCase = true) }
-            
-            if (filtered.isNotEmpty()) {
-                Surface(
-                    modifier = Modifier
-                        .padding(top = 24.dp)
-                        .width(260.dp)
-                        .heightIn(max = 220.dp)
-                        .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(6.dp)),
-                    color = GrimoireColors.SurfaceCard,
-                    shadowElevation = 8.dp,
-                    shape = RoundedCornerShape(6.dp)
-                ) {
-                    LazyColumn {
-                        items(filtered.take(10)) { ent ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        val text = textFieldValue.text
-                                        val before = text.substring(0, dropdownStartOffset - 1) // include @
-                                        val after = text.substring(textFieldValue.selection.start)
-                                        val newContent = "$before@[${ent.id}]$after"
-                                        val newSelection = TextRange(before.length + ent.id.length + 3)
-                                        onValueChange(TextFieldValue(newContent, newSelection))
-                                    }
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                val c = try { Color(ent.color?.toULong() ?: 0xFFFFFFFFuL) } catch(e: Exception) { GrimoireColors.GoldPrimary }
-                                Box(modifier = Modifier.size(10.dp).background(c, RoundedCornerShape(2.dp)))
-                                Spacer(Modifier.width(8.dp))
-                                Text(ent.name, fontWeight = FontWeight.Bold, color = GrimoireColors.ParchmentLight)
-                                Spacer(Modifier.width(8.dp))
-                                Text("(${ent.type})", color = GrimoireColors.ParchmentMuted, fontSize = 12.sp)
-                            }
+        if (isDropdownActive) {
+            val density = LocalDensity.current
+            val maxContainerWidthPx = with(density) { maxWidth.toPx() }
+            val menuWidthPx = with(density) { 260.dp.toPx() }
+
+            val cursor = textFieldValue.selection.start.coerceIn(0, textFieldValue.text.length)
+            val transCursor = currentOffsetMapping.originalToTransformed(cursor).coerceIn(0, annotatedText.length)
+            val cursorRect = textLayoutResult?.getCursorRect(transCursor)
+
+            val popupX = if (cursorRect != null) {
+                cursorRect.left.coerceIn(0f, (maxContainerWidthPx - menuWidthPx).coerceAtLeast(0f))
+            } else {
+                0f
+            }
+            val popupY = if (cursorRect != null) {
+                cursorRect.bottom + with(density) { 4.dp.toPx() }
+            } else {
+                with(density) { 24.dp.toPx() }
+            }
+
+            Surface(
+                modifier = Modifier
+                    .offset { IntOffset(popupX.roundToInt(), popupY.roundToInt()) }
+                    .width(260.dp)
+                    .heightIn(max = 220.dp)
+                    .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(6.dp)),
+                color = GrimoireColors.SurfaceCard,
+                shadowElevation = 8.dp,
+                shape = RoundedCornerShape(6.dp)
+            ) {
+                LazyColumn(state = dropdownListState) {
+                    itemsIndexed(displayEntities) { index, ent ->
+                        val isSelected = index == clampedSelectedIndex
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    if (isSelected) GrimoireColors.GoldPrimary.copy(alpha = 0.22f)
+                                    else Color.Transparent
+                                )
+                                .clickable {
+                                    val (newContent, newSel) = replaceEntityQueryWithLink(
+                                        text = textFieldValue.text,
+                                        cursor = textFieldValue.selection.start,
+                                        query = dropdownQuery ?: "",
+                                        entityId = ent.id
+                                    )
+                                    dropdownQuery = null
+                                    dropdownDismissed = false
+                                    onValueChange(TextFieldValue(newContent, newSel))
+                                }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val c = try { Color(ent.color?.toULong() ?: 0xFFFFFFFFuL) } catch(e: Exception) { GrimoireColors.GoldPrimary }
+                            Box(modifier = Modifier.size(10.dp).background(c, RoundedCornerShape(2.dp)))
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                ent.name,
+                                fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Bold,
+                                color = if (isSelected) GrimoireColors.GoldPrimary else GrimoireColors.ParchmentLight
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "(${ent.type})",
+                                color = if (isSelected) GrimoireColors.ParchmentLight else GrimoireColors.ParchmentMuted,
+                                fontSize = 12.sp
+                            )
                         }
                     }
                 }
@@ -520,6 +636,41 @@ private fun MarkdownEdit(
 }
 
 internal val ENTITY_MENTION_REGEX = Regex("(?<!\\\\)@\\[(.*?)\\]")
+
+internal fun replaceEntityQueryWithLink(
+    text: String,
+    cursor: Int,
+    query: String,
+    entityId: String
+): Pair<String, TextRange> {
+    val atIndex = (cursor - 1 - query.length).coerceAtLeast(0)
+
+    // Check if cursor or atIndex is within or touching an existing @[entityId] mention
+    val existingMatch = ENTITY_MENTION_REGEX.findAll(text).find { match ->
+        cursor in match.range.first..(match.range.last + 1) || atIndex == match.range.first
+    }
+
+    val (before, after) = if (existingMatch != null) {
+        Pair(
+            text.substring(0, existingMatch.range.first),
+            text.substring(existingMatch.range.last + 1)
+        )
+    } else {
+        val b = text.substring(0, atIndex)
+        val rawAfter = text.substring(cursor.coerceIn(0, text.length))
+        val bracketMatch = Regex("^\\[[^\\]\\r\\n]*\\]").find(rawAfter)
+        val a = if (bracketMatch != null) {
+            rawAfter.substring(bracketMatch.range.last + 1)
+        } else {
+            rawAfter
+        }
+        Pair(b, a)
+    }
+
+    val newContent = "$before@[${entityId}]$after"
+    val newCursor = before.length + entityId.length + 3
+    return Pair(newContent, TextRange(newCursor))
+}
 
 internal fun isEntityExpanded(matchRange: IntRange, cursorSelection: TextRange?): Boolean {
     if (cursorSelection == null) return false

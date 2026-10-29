@@ -10,6 +10,7 @@ import de.luca.dungeon_master_manager.ui.VerticalTextLayout
 import de.luca.dungeon_master_manager.ui.calculateVerticalMove
 import de.luca.dungeon_master_manager.ui.expandMarkdownTokenSelection
 import de.luca.dungeon_master_manager.ui.parseMarkdown
+import de.luca.dungeon_master_manager.ui.replaceEntityQueryWithLink
 import de.luca.dungeonmastermanager.database.Entity
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -797,5 +798,152 @@ wawdawawdawdawdawwd awd awdwd awdawd awd awd awdwd awdwdadadawdawd awd
             stepsUp++
         }
         assertEquals(0, selection.start, "Repeated Arrow Up must reach start of document")
+    }
+
+    @Test
+    fun testReplaceEntityQueryWithLink_VariousCursorAndQueryScenarios() {
+        // Scenario 1: Just "@" at the beginning of document
+        val (text1, sel1) = replaceEntityQueryWithLink(
+            text = "@",
+            cursor = 1,
+            query = "",
+            entityId = "ent-123"
+        )
+        assertEquals("@[ent-123]", text1)
+        assertEquals(10, sel1.start) // after ']'
+        assertEquals(sel1.start, sel1.end)
+
+        // Scenario 2: Typed "@Gro" in the middle of a sentence
+        val original2 = "Speak with @Gro and finish the quest."
+        val cursor2 = original2.indexOf("@Gro") + 4 // cursor right after 'o'
+        val (text2, sel2) = replaceEntityQueryWithLink(
+            text = original2,
+            cursor = cursor2,
+            query = "Gro",
+            entityId = "grom-the-goblin"
+        )
+        assertEquals("Speak with @[grom-the-goblin] and finish the quest.", text2)
+        assertEquals("Speak with @[grom-the-goblin]".length, sel2.start)
+
+        // Scenario 3: At the end of document with multi-word query
+        val original3 = "Boss is @Goblin King"
+        val cursor3 = original3.length
+        val (text3, sel3) = replaceEntityQueryWithLink(
+            text = original3,
+            cursor = cursor3,
+            query = "Goblin King",
+            entityId = "king-id"
+        )
+        assertEquals("Boss is @[king-id]", text3)
+        assertEquals("Boss is @[king-id]".length, sel3.start)
+
+        // Scenario 4: Cursor right behind '@' of an existing entity link (e.g. replacing existing entity)
+        val original4 = "Treffe @[d2d19c17-f139-4473-89cd-d6b4af1209d3] am Tor."
+        val cursor4 = original4.indexOf("@") + 1 // cursor right after '@', before '['
+        val (text4, sel4) = replaceEntityQueryWithLink(
+            text = original4,
+            cursor = cursor4,
+            query = "",
+            entityId = "new-hero-id"
+        )
+        // The old [d2d19c17...] must NOT remain as trailing text!
+        assertEquals("Treffe @[new-hero-id] am Tor.", text4)
+        assertEquals("Treffe @[new-hero-id]".length, sel4.start)
+
+        // Scenario 5: Cursor behind '@' of an existing entity link with query typed between @ and [
+        val original5 = "Treffe @Jerry[d2d19c17-f139-4473-89cd-d6b4af1209d3] am Tor."
+        val cursor5 = original5.indexOf("@Jerry") + 6 // right after 'y'
+        val (text5, sel5) = replaceEntityQueryWithLink(
+            text = original5,
+            cursor = cursor5,
+            query = "Jerry",
+            entityId = "jerry-uuid-123"
+        )
+        assertEquals("Treffe @[jerry-uuid-123] am Tor.", text5)
+        assertEquals("Treffe @[jerry-uuid-123]".length, sel5.start)
+
+        // Scenario 6: Cursor anywhere inside the UUID between @ and ] (e.g. in the middle or right before ']')
+        val original6 = "Treffe @[d2d19c17-f139-4473-89cd-d6b4af1209d3] am Tor."
+        val cursorMiddle = original6.indexOf("f139") // middle of UUID
+        val (text6Middle, sel6Middle) = replaceEntityQueryWithLink(
+            text = original6,
+            cursor = cursorMiddle,
+            query = "",
+            entityId = "replaced-middle-id"
+        )
+        assertEquals("Treffe @[replaced-middle-id] am Tor.", text6Middle)
+        assertEquals("Treffe @[replaced-middle-id]".length, sel6Middle.start)
+
+        val cursorBeforeBracket = original6.indexOf("]") // right before ']'
+        val (text6End, sel6End) = replaceEntityQueryWithLink(
+            text = original6,
+            cursor = cursorBeforeBracket,
+            query = "",
+            entityId = "replaced-end-id"
+        )
+        assertEquals("Treffe @[replaced-end-id] am Tor.", text6End)
+        assertEquals("Treffe @[replaced-end-id]".length, sel6End.start)
+
+        // Verify that the resulting text with the new selection keeps the entity collapsed when parsed!
+        val mockEnt = Entity("king-id", "The King", "NPC", null, null)
+        val (annotated, _) = parseMarkdown(text3, primaryColor, sel3, listOf(mockEnt), fantasyFamily)
+        assertEquals("Boss is The King", annotated.text, "Entity must be collapsed when cursor lands right after ']'")
+    }
+
+    @Test
+    fun testInsideEntityDetectionRange() {
+        val text = "Vor @[entity-123] Nach"
+        val atPos = text.indexOf("@")
+        val bracketPos = text.indexOf("]")
+
+        val regex = Regex("(?<!\\\\)@\\[(.*?)\\]")
+
+        fun isInside(cursor: Int): Boolean =
+            regex.findAll(text).any { cursor in (it.range.first + 1)..it.range.last }
+
+        // Cursor before '@' -> false
+        assertTrue(!isInside(atPos))
+
+        // Cursor right after '@' -> true
+        assertTrue(isInside(atPos + 1))
+
+        // Cursor inside '[' -> true
+        assertTrue(isInside(atPos + 2))
+
+        // Cursor in middle of ID -> true
+        assertTrue(isInside(text.indexOf("entity")))
+
+        // Cursor right before ']' -> true
+        assertTrue(isInside(bracketPos))
+
+        // Cursor right after ']' -> false
+        assertTrue(!isInside(bracketPos + 1))
+    }
+
+    @Test
+    fun testDropdownCyclicNavigation() {
+        val listSize = 5
+
+        // Starting at 0: Arrow Down steps forward
+        var index = 0
+        index = (index + 1) % listSize
+        assertEquals(1, index)
+
+        index = (index + 1) % listSize
+        assertEquals(2, index)
+
+        // Moving to the end
+        index = 4
+        // Arrow Down wraps around to 0
+        index = (index + 1) % listSize
+        assertEquals(0, index)
+
+        // From 0, Arrow Up wraps around to last item (4)
+        index = (index - 1 + listSize) % listSize
+        assertEquals(4, index)
+
+        // Arrow Up moves backward
+        index = (index - 1 + listSize) % listSize
+        assertEquals(3, index)
     }
 }
