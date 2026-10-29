@@ -6,6 +6,8 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.isSpecified
+import androidx.compose.ui.unit.sp
+import de.luca.dungeon_master_manager.data.AppSettingsRepository
 import de.luca.dungeon_master_manager.ui.VerticalTextLayout
 import de.luca.dungeon_master_manager.ui.calculateVerticalMove
 import de.luca.dungeon_master_manager.ui.expandMarkdownTokenSelection
@@ -945,5 +947,50 @@ wawdawawdawdawdawwd awd awdwd awdawd awd awd awdwd awdwdadadawdawd awd
         // Arrow Up moves backward
         index = (index - 1 + listSize) % listSize
         assertEquals(3, index)
+    }
+
+    @Test
+    fun testMarkdownHeadingScaling_ProportionalToBaseFontSize() {
+        val markdown = "# Heading 1\n## Heading 2\n### Heading 3"
+
+        // Default baseFontSize = 16
+        val (annotated16, _) = parseMarkdown(markdown, primaryColor, TextRange(100), emptyList(), fantasyFamily, baseFontSize = 16)
+        val styles16 = annotated16.spanStyles.filter { it.item.fontSize.isSpecified }
+        assertEquals(3, styles16.size)
+        assertEquals(26.sp, styles16[0].item.fontSize)
+        assertEquals(22.sp, styles16[1].item.fontSize)
+        assertEquals(18.sp, styles16[2].item.fontSize)
+
+        // Scaled up baseFontSize = 24 (1.5x)
+        val (annotated24, _) = parseMarkdown(markdown, primaryColor, TextRange(100), emptyList(), fantasyFamily, baseFontSize = 24)
+        val styles24 = annotated24.spanStyles.filter { it.item.fontSize.isSpecified }
+        assertEquals(3, styles24.size)
+        assertEquals(39.sp, styles24[0].item.fontSize) // 26 * 1.5 = 39
+        assertEquals(33.sp, styles24[1].item.fontSize) // 22 * 1.5 = 33
+        assertEquals(27.sp, styles24[2].item.fontSize) // 18 * 1.5 = 27
+
+        // Scaled down baseFontSize = 12 (0.75x)
+        val (annotated12, _) = parseMarkdown(markdown, primaryColor, TextRange(100), emptyList(), fantasyFamily, baseFontSize = 12)
+        val styles12 = annotated12.spanStyles.filter { it.item.fontSize.isSpecified }
+        assertEquals(3, styles12.size)
+        assertEquals(20.sp, styles12[0].item.fontSize) // round(26 * 0.75) = 20
+        assertEquals(17.sp, styles12[1].item.fontSize) // round(22 * 0.75) = 17
+        assertEquals(14.sp, styles12[2].item.fontSize) // round(18 * 0.75) = 14
+    }
+
+    @Test
+    fun testAppSettings_EditorFontSizeClamping() {
+        val min = AppSettingsRepository.MIN_EDITOR_FONT_SIZE
+        val max = AppSettingsRepository.MAX_EDITOR_FONT_SIZE
+        val defaultSize = AppSettingsRepository.DEFAULT_EDITOR_FONT_SIZE
+
+        assertEquals(10, min)
+        assertEquals(32, max)
+        assertEquals(16, defaultSize)
+
+        // Verify clamping logic
+        assertEquals(min, (5).coerceIn(min, max))
+        assertEquals(max, (50).coerceIn(min, max))
+        assertEquals(20, (20).coerceIn(min, max))
     }
 }

@@ -10,10 +10,24 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isCtrlPressed
+import androidx.compose.ui.input.pointer.isMetaPressed
+import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
@@ -22,13 +36,16 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import de.luca.dungeon_master_manager.data.AppSettingsRepository
+import de.luca.dungeon_master_manager.ui.components.EditorFontSizeControl
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
  * Plain text editor featuring monospace typography, word wrapping,
- * clipboard copy, and debounced auto-save support.
+ * clipboard copy, adjustable font size, and debounced auto-save support.
  */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun PlainTextEditor(
     content: String,
@@ -36,6 +53,9 @@ fun PlainTextEditor(
     fileName: String,
     modifier: Modifier = Modifier,
 ) {
+    val settings by AppSettingsRepository.settings.collectAsState()
+    val fontSize = settings.editorFontSize
+
     var textFieldValue by remember { mutableStateOf(TextFieldValue(content)) }
     var justCopied by remember { mutableStateOf(false) }
 
@@ -67,8 +87,8 @@ fun PlainTextEditor(
 
     val textStyle = TextStyle(
         fontFamily = FontFamily.Monospace,
-        fontSize = 13.sp,
-        lineHeight = 20.sp,
+        fontSize = fontSize.sp,
+        lineHeight = (fontSize * 1.5f).sp,
         color = MaterialTheme.colorScheme.onSurface
     )
 
@@ -99,6 +119,18 @@ fun PlainTextEditor(
                 )
 
                 Spacer(modifier = Modifier.weight(1f))
+
+                // Font size controls
+                EditorFontSizeControl(
+                    fontSize = fontSize,
+                    onFontSizeChange = { newSize ->
+                        coroutineScope.launch {
+                            AppSettingsRepository.setEditorFontSize(newSize)
+                        }
+                    }
+                )
+
+                Spacer(Modifier.width(12.dp))
 
                 // Copy All button
                 OutlinedButton(
@@ -142,6 +174,23 @@ fun PlainTextEditor(
                             selection = TextRange(targetLen)
                         )
                     }
+                    .onPointerEvent(PointerEventType.Scroll, pass = PointerEventPass.Initial) { event ->
+                        val isCtrl = event.keyboardModifiers.isCtrlPressed || event.keyboardModifiers.isMetaPressed
+                        if (isCtrl) {
+                            val delta = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
+                            if (delta < 0f) {
+                                coroutineScope.launch {
+                                    AppSettingsRepository.setEditorFontSize(fontSize + 1)
+                                }
+                                event.changes.forEach { it.consume() }
+                            } else if (delta > 0f) {
+                                coroutineScope.launch {
+                                    AppSettingsRepository.setEditorFontSize(fontSize - 1)
+                                }
+                                event.changes.forEach { it.consume() }
+                            }
+                        }
+                    }
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
                 BasicTextField(
@@ -157,6 +206,35 @@ fun PlainTextEditor(
                     modifier = Modifier
                         .fillMaxWidth()
                         .focusRequester(focusRequester)
+                        .onPreviewKeyEvent { keyEvent ->
+                            if (keyEvent.type != KeyEventType.KeyDown) {
+                                return@onPreviewKeyEvent false
+                            }
+                            val isCtrl = keyEvent.isCtrlPressed || keyEvent.isMetaPressed
+                            if (isCtrl && !keyEvent.isAltPressed) {
+                                when (keyEvent.key) {
+                                    Key.Plus, Key.Equals, Key.NumPadAdd -> {
+                                        coroutineScope.launch {
+                                            AppSettingsRepository.setEditorFontSize(fontSize + 1)
+                                        }
+                                        return@onPreviewKeyEvent true
+                                    }
+                                    Key.Minus, Key.NumPadSubtract -> {
+                                        coroutineScope.launch {
+                                            AppSettingsRepository.setEditorFontSize(fontSize - 1)
+                                        }
+                                        return@onPreviewKeyEvent true
+                                    }
+                                    Key.Zero, Key.NumPad0 -> {
+                                        coroutineScope.launch {
+                                            AppSettingsRepository.setEditorFontSize(AppSettingsRepository.DEFAULT_EDITOR_FONT_SIZE)
+                                        }
+                                        return@onPreviewKeyEvent true
+                                    }
+                                }
+                            }
+                            false
+                        }
                 )
             }
         }

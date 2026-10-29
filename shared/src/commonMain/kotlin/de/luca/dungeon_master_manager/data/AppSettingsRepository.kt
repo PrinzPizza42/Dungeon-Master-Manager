@@ -41,8 +41,17 @@ object AppSettingsRepository {
         }
     }
 
+    const val DEFAULT_EDITOR_FONT_SIZE = 16
+    const val MIN_EDITOR_FONT_SIZE = 10
+    const val MAX_EDITOR_FONT_SIZE = 32
+
     suspend fun setBatterySaverMode(enabled: Boolean) {
         updateSettings { it.copy(isBatterySaverMode = enabled) }
+    }
+
+    suspend fun setEditorFontSize(fontSize: Int) {
+        val clamped = fontSize.coerceIn(MIN_EDITOR_FONT_SIZE, MAX_EDITOR_FONT_SIZE)
+        updateSettings { it.copy(editorFontSize = clamped) }
     }
 
     suspend fun updateSettings(transform: (AppSettings) -> AppSettings) = withContext(Dispatchers.IO) {

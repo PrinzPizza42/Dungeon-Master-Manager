@@ -11,6 +11,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import de.luca.dungeon_master_manager.data.AppSettingsRepository
+import de.luca.dungeon_master_manager.ui.components.EditorFontSizeControl
 import de.luca.dungeon_master_manager.ui.theme.GrimoireCard
 import de.luca.dungeon_master_manager.ui.theme.GrimoireColors
 import de.luca.dungeon_master_manager.ui.theme.GrimoireDivider
@@ -87,6 +88,41 @@ fun SettingsDialog(
                             uncheckedThumbColor = GrimoireColors.ParchmentDim,
                             uncheckedTrackColor = GrimoireColors.Surface
                         )
+                    )
+                }
+
+                Spacer(Modifier.height(16.dp))
+                GrimoireDivider(showDiamond = false, color = GrimoireColors.BorderBronzeSubtle)
+                Spacer(Modifier.height(16.dp))
+
+                // Setting: Editor Font Size
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                        Text(
+                            text = "Editor Font Size",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = GrimoireColors.ParchmentLight,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "Adjusts the base text size for the Markdown and Plaintext document editors.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = GrimoireColors.ParchmentMuted
+                        )
+                    }
+
+                    EditorFontSizeControl(
+                        fontSize = settings.editorFontSize,
+                        onFontSizeChange = { newSize ->
+                            scope.launch {
+                                AppSettingsRepository.setEditorFontSize(newSize)
+                            }
+                        }
                     )
                 }
 

@@ -40,6 +40,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerButton
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.isMetaPressed
@@ -61,6 +62,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
+import de.luca.dungeon_master_manager.data.AppSettingsRepository
+import de.luca.dungeon_master_manager.ui.components.EditorFontSizeControl
 import de.luca.dungeon_master_manager.ui.theme.GrimoireColors
 import de.luca.dungeon_master_manager.ui.theme.GrimoireDivider
 import de.luca.dungeon_master_manager.ui.theme.LocalFantasyFontFamily
@@ -68,6 +71,7 @@ import de.luca.dungeon_master_manager.ui.theme.tiledTexture
 import dungeon_master_manager.shared.generated.resources.Res
 import dungeon_master_manager.shared.generated.resources.grimoire_vellum
 import de.luca.dungeonmastermanager.database.Entity
+import kotlinx.coroutines.launch
 
 @Composable
 fun MarkdownEditor(
@@ -77,6 +81,10 @@ fun MarkdownEditor(
     onOpenEntityPopout: (String) -> Unit = {},
     entities: List<Entity> = emptyList()
 ) {
+    val settings by AppSettingsRepository.settings.collectAsState()
+    val fontSize = settings.editorFontSize
+    val coroutineScope = rememberCoroutineScope()
+
     var textFieldValue by remember {
         mutableStateOf(TextFieldValue(content))
     }
@@ -221,6 +229,15 @@ fun MarkdownEditor(
             }
 
             Spacer(modifier = Modifier.weight(1f))
+
+            EditorFontSizeControl(
+                fontSize = fontSize,
+                onFontSizeChange = { newSize ->
+                    coroutineScope.launch {
+                        AppSettingsRepository.setEditorFontSize(newSize)
+                    }
+                }
+            )
         }
 
         GrimoireDivider()
@@ -243,6 +260,12 @@ fun MarkdownEditor(
             MarkdownEdit(
                 textFieldValue = textFieldValue,
                 entities = entities,
+                fontSize = fontSize,
+                onFontSizeChange = { newSize ->
+                    coroutineScope.launch {
+                        AppSettingsRepository.setEditorFontSize(newSize)
+                    }
+                },
                 onOpenEntityPopout = onOpenEntityPopout,
                 focusRequester = focusRequester,
                 onValueChange = { newValue ->
@@ -265,6 +288,8 @@ fun MarkdownEditor(
 private fun MarkdownEdit(
     textFieldValue: TextFieldValue,
     entities: List<Entity>,
+    fontSize: Int,
+    onFontSizeChange: (Int) -> Unit,
     onValueChange: (TextFieldValue) -> Unit,
     onFormat: (String) -> Unit,
     onOpenEntityPopout: (String) -> Unit,
@@ -278,9 +303,10 @@ private fun MarkdownEdit(
         textFieldValue.text,
         textFieldValue.selection,
         entities,
-        fantasyFamily
+        fantasyFamily,
+        fontSize
     ) {
-        parseMarkdown(textFieldValue.text, primaryColor, textFieldValue.selection, entities, fantasyFamily)
+        parseMarkdown(textFieldValue.text, primaryColor, textFieldValue.selection, entities, fantasyFamily, fontSize)
     }
 
     val markdownTransformation = remember(annotatedText, currentOffsetMapping) {
@@ -395,6 +421,19 @@ private fun MarkdownEdit(
             ) {
                 focusRequester.requestFocus()
             }
+            .onPointerEvent(PointerEventType.Scroll, pass = PointerEventPass.Initial) { event ->
+                val isCtrl = event.keyboardModifiers.isCtrlPressed || event.keyboardModifiers.isMetaPressed
+                if (isCtrl) {
+                    val delta = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
+                    if (delta < 0f) {
+                        onFontSizeChange(fontSize + 1)
+                        event.changes.forEach { it.consume() }
+                    } else if (delta > 0f) {
+                        onFontSizeChange(fontSize - 1)
+                        event.changes.forEach { it.consume() }
+                    }
+                }
+            }
             .onPointerEvent(PointerEventType.Press) { event ->
                 stickyX = null
                 lastVerticalSelection = null
@@ -472,7 +511,26 @@ private fun MarkdownEdit(
                         }
 
                         val key = keyEvent.key
-                        val hasCommandModifier = keyEvent.isCtrlPressed || keyEvent.isAltPressed || keyEvent.isMetaPressed
+                        val isCtrl = keyEvent.isCtrlPressed || keyEvent.isMetaPressed
+
+                        if (isCtrl && !keyEvent.isAltPressed) {
+                            when (key) {
+                                Key.Plus, Key.Equals, Key.NumPadAdd -> {
+                                    onFontSizeChange(fontSize + 1)
+                                    return@onPreviewKeyEvent true
+                                }
+                                Key.Minus, Key.NumPadSubtract -> {
+                                    onFontSizeChange(fontSize - 1)
+                                    return@onPreviewKeyEvent true
+                                }
+                                Key.Zero, Key.NumPad0 -> {
+                                    onFontSizeChange(AppSettingsRepository.DEFAULT_EDITOR_FONT_SIZE)
+                                    return@onPreviewKeyEvent true
+                                }
+                            }
+                        }
+
+                        val hasCommandModifier = isCtrl || keyEvent.isAltPressed
 
                         if (isDropdownActive && !hasCommandModifier) {
                             when (key) {
@@ -551,8 +609,8 @@ private fun MarkdownEdit(
                     },
                 textStyle = TextStyle(
                     color = GrimoireColors.ParchmentLight,
-                    fontSize = 16.sp,
-                    lineHeight = 24.sp
+                    fontSize = fontSize.sp,
+                    lineHeight = (fontSize * 1.5f).sp
                 ),
                 cursorBrush = SolidColor(GrimoireColors.GoldPrimary),
                 visualTransformation = markdownTransformation
@@ -851,7 +909,8 @@ internal fun parseMarkdown(
     primaryColor: Color,
     cursorSelection: TextRange?,
     entities: List<Entity> = emptyList(),
-    fantasyFamily: FontFamily = FontFamily.Serif
+    fantasyFamily: FontFamily = FontFamily.Serif,
+    baseFontSize: Int = 16
 ): Pair<AnnotatedString, OffsetMapping> {
     val builder = AnnotatedString.Builder()
     
@@ -1051,10 +1110,11 @@ internal fun parseMarkdown(
         } else if (match.groups[5] != null) {
             val hashes = match.groups[5]!!.value
             val content = match.groups[6]!!.value
-            val fontSize = when (hashes.length) {
-                1 -> 26.sp
-                2 -> 22.sp
-                else -> 18.sp
+            val scaleFactor = baseFontSize / 16f
+            val headingFontSize = when (hashes.length) {
+                1 -> (26f * scaleFactor).roundToInt().sp
+                2 -> (22f * scaleFactor).roundToInt().sp
+                else -> (18f * scaleFactor).roundToInt().sp
             }
             val prefixLen = hashes.length + 1 // hashes plus space
             val isCursorOnLine = isCursorInLine(match.range)
@@ -1074,7 +1134,7 @@ internal fun parseMarkdown(
                     SpanStyle(
                         color = primaryColor,
                         fontWeight = FontWeight.Bold,
-                        fontSize = fontSize,
+                        fontSize = headingFontSize,
                         fontFamily = fantasyFamily
                     ),
                     transStart,
@@ -1092,7 +1152,7 @@ internal fun parseMarkdown(
                     SpanStyle(
                         color = primaryColor,
                         fontWeight = FontWeight.Bold,
-                        fontSize = fontSize,
+                        fontSize = headingFontSize,
                         fontFamily = fantasyFamily
                     ),
                     transStart,
