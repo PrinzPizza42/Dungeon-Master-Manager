@@ -143,7 +143,7 @@ fun ProjectEditorScreen(
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
-                                "No manuscript open",
+                                "No tab open",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = GrimoireColors.ParchmentMuted,
                             )

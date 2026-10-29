@@ -3,6 +3,7 @@ package de.luca.dungeon_master_manager.ui
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ContextMenuDataProvider
 import androidx.compose.foundation.ContextMenuItem
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -10,18 +11,41 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerButton
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isCtrlPressed
+import androidx.compose.ui.input.pointer.isMetaPressed
+import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -35,7 +59,6 @@ import androidx.compose.ui.unit.sp
 import de.luca.dungeon_master_manager.ui.theme.GrimoireColors
 import de.luca.dungeon_master_manager.ui.theme.GrimoireDivider
 import de.luca.dungeon_master_manager.ui.theme.LocalFantasyFontFamily
-import de.luca.dungeon_master_manager.ui.theme.GrimoireVellumTomePage
 import de.luca.dungeon_master_manager.ui.theme.tiledTexture
 import dungeon_master_manager.shared.generated.resources.Res
 import dungeon_master_manager.shared.generated.resources.grimoire_vellum
@@ -49,23 +72,15 @@ fun MarkdownEditor(
     onOpenEntityPopout: (String) -> Unit = {},
     entities: List<Entity> = emptyList()
 ) {
-    var isPreviewMode by remember { mutableStateOf(false) }
-
     var textFieldValue by remember {
         mutableStateOf(TextFieldValue(content))
     }
 
     LaunchedEffect(content) {
         if (content != textFieldValue.text) {
-            val newSelection = if (content.startsWith(textFieldValue.text)) {
-                androidx.compose.ui.text.TextRange(content.length)
-            } else {
-                androidx.compose.ui.text.TextRange(
-                    textFieldValue.selection.start.coerceAtMost(content.length),
-                    textFieldValue.selection.end.coerceAtMost(content.length)
-                )
-            }
-            textFieldValue = TextFieldValue(text = content, selection = newSelection)
+            val start = textFieldValue.selection.start.coerceIn(0, content.length)
+            val end = textFieldValue.selection.end.coerceIn(0, content.length)
+            textFieldValue = TextFieldValue(text = content, selection = TextRange(start, end))
         }
     }
 
@@ -81,7 +96,7 @@ fun MarkdownEditor(
         if (selected.startsWith(formatSyntax) && selected.endsWith(formatSyntax) && selected.length >= formatSyntax.length * 2) {
             val unformatted = selected.substring(formatSyntax.length, selected.length - formatSyntax.length)
             val newContent = "$before$unformatted$after"
-            val newSelection = androidx.compose.ui.text.TextRange(selection.min, selection.min + unformatted.length)
+            val newSelection = TextRange(selection.min, selection.min + unformatted.length)
             textFieldValue = TextFieldValue(newContent, newSelection)
             onContentChange(newContent)
             return
@@ -92,7 +107,7 @@ fun MarkdownEditor(
             val newBefore = before.substring(0, before.length - formatSyntax.length)
             val newAfter = after.substring(formatSyntax.length)
             val newContent = "$newBefore$selected$newAfter"
-            val newSelection = androidx.compose.ui.text.TextRange(newBefore.length, newBefore.length + selected.length)
+            val newSelection = TextRange(newBefore.length, newBefore.length + selected.length)
             textFieldValue = TextFieldValue(newContent, newSelection)
             onContentChange(newContent)
             return
@@ -101,17 +116,56 @@ fun MarkdownEditor(
         val newContent = "$before$formatSyntax$selected$formatSyntax$after"
         
         val newSelection = if (selected.isEmpty()) {
-            androidx.compose.ui.text.TextRange(selection.min + formatSyntax.length)
+            TextRange(selection.min + formatSyntax.length)
         } else {
-            androidx.compose.ui.text.TextRange(selection.min, selection.max + formatSyntax.length * 2)
+            TextRange(selection.min, selection.max + formatSyntax.length * 2)
         }
         
         textFieldValue = TextFieldValue(newContent, newSelection)
         onContentChange(newContent)
     }
 
+    fun toggleOrInsertHeading() {
+        val text = textFieldValue.text
+        val selection = textFieldValue.selection
+        val cursor = selection.min.coerceIn(0, text.length)
+        
+        val lineStart = if (cursor == 0) 0 else {
+            val prevNl = text.lastIndexOf('\n', cursor - 1)
+            if (prevNl == -1) 0 else prevNl + 1
+        }
+        val nextNl = text.indexOf('\n', cursor).let { if (it == -1) text.length else it }
+        val lineText = text.substring(lineStart, nextNl)
+        
+        val headingMatch = Regex("^(#{1,6}) (.*)$").find(lineText)
+        val (newText, newCursor) = if (headingMatch != null) {
+            val hashes = headingMatch.groups[1]!!.value
+            val rest = headingMatch.groups[2]!!.value
+            if (hashes.length < 6) {
+                // Increase heading level (# -> ## -> ### ...)
+                val updatedLine = "#$hashes $rest"
+                val updated = text.substring(0, lineStart) + updatedLine + text.substring(nextNl)
+                Pair(updated, (cursor + 1).coerceAtMost(updated.length))
+            } else {
+                // At level 6, cycling removes the heading syntax back to normal text
+                val updatedLine = rest
+                val updated = text.substring(0, lineStart) + updatedLine + text.substring(nextNl)
+                val diff = hashes.length + 1
+                Pair(updated, (cursor - diff).coerceIn(lineStart, updated.length))
+            }
+        } else {
+            // Insert "# " at the beginning of the line
+            val updatedLine = "# $lineText"
+            val updated = text.substring(0, lineStart) + updatedLine + text.substring(nextNl)
+            Pair(updated, (cursor + 2).coerceAtMost(updated.length))
+        }
+        
+        textFieldValue = TextFieldValue(newText, TextRange(newCursor))
+        onContentChange(newText)
+    }
+
     Column(modifier = modifier.fillMaxSize().background(GrimoireColors.Background)) {
-        // Toolbar
+        // Toolbar with Live-Preview actions
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -120,9 +174,7 @@ fun MarkdownEditor(
             verticalAlignment = Alignment.CenterVertically
         ) {
             OutlinedButton(
-                onClick = { 
-                    onContentChange(content + "\n# New Heading\n")
-                },
+                onClick = { toggleOrInsertHeading() },
                 border = BorderStroke(1.dp, GrimoireColors.BorderBronze),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = GrimoireColors.GoldPrimary),
                 shape = RoundedCornerShape(4.dp),
@@ -132,145 +184,78 @@ fun MarkdownEditor(
                 Text("+ Heading", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
             }
 
-            if (!isPreviewMode) {
-                OutlinedButton(
-                    onClick = { applyFormat("**") },
-                    border = BorderStroke(1.dp, GrimoireColors.BorderBronze),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = GrimoireColors.ParchmentLight),
-                    shape = RoundedCornerShape(4.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                    modifier = Modifier.padding(end = 4.dp).defaultMinSize(minWidth = 32.dp, minHeight = 30.dp)
-                ) {
-                    Text("B", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                }
-                OutlinedButton(
-                    onClick = { applyFormat("*") },
-                    border = BorderStroke(1.dp, GrimoireColors.BorderBronze),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = GrimoireColors.ParchmentLight),
-                    shape = RoundedCornerShape(4.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                    modifier = Modifier.padding(end = 4.dp).defaultMinSize(minWidth = 32.dp, minHeight = 30.dp)
-                ) {
-                    Text("I", fontStyle = FontStyle.Italic, fontSize = 13.sp)
-                }
-                OutlinedButton(
-                    onClick = { applyFormat("__") },
-                    border = BorderStroke(1.dp, GrimoireColors.BorderBronze),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = GrimoireColors.ParchmentLight),
-                    shape = RoundedCornerShape(4.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                    modifier = Modifier.padding(end = 4.dp).defaultMinSize(minWidth = 32.dp, minHeight = 30.dp)
-                ) {
-                    Text("U", textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline, fontSize = 13.sp)
-                }
+            OutlinedButton(
+                onClick = { applyFormat("**") },
+                border = BorderStroke(1.dp, GrimoireColors.BorderBronze),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = GrimoireColors.ParchmentLight),
+                shape = RoundedCornerShape(4.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                modifier = Modifier.padding(end = 4.dp).defaultMinSize(minWidth = 32.dp, minHeight = 30.dp)
+            ) {
+                Text("B", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            }
+            OutlinedButton(
+                onClick = { applyFormat("*") },
+                border = BorderStroke(1.dp, GrimoireColors.BorderBronze),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = GrimoireColors.ParchmentLight),
+                shape = RoundedCornerShape(4.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                modifier = Modifier.padding(end = 4.dp).defaultMinSize(minWidth = 32.dp, minHeight = 30.dp)
+            ) {
+                Text("I", fontStyle = FontStyle.Italic, fontSize = 13.sp)
+            }
+            OutlinedButton(
+                onClick = { applyFormat("__") },
+                border = BorderStroke(1.dp, GrimoireColors.BorderBronze),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = GrimoireColors.ParchmentLight),
+                shape = RoundedCornerShape(4.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                modifier = Modifier.padding(end = 4.dp).defaultMinSize(minWidth = 32.dp, minHeight = 30.dp)
+            ) {
+                Text("U", textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline, fontSize = 13.sp)
             }
 
             Spacer(modifier = Modifier.weight(1f))
-
-            // Edit vs Preview tab toggle
-            Row(
-                modifier = Modifier
-                    .background(GrimoireColors.SurfaceCard, RoundedCornerShape(4.dp))
-                    .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(4.dp))
-                    .padding(2.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .clickable { isPreviewMode = false }
-                        .background(
-                            if (!isPreviewMode) GrimoireColors.GoldPrimary else Color.Transparent,
-                            RoundedCornerShape(3.dp)
-                        )
-                        .padding(horizontal = 12.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        "Edit",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (!isPreviewMode) GrimoireColors.Background else GrimoireColors.ParchmentMuted
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .clickable { isPreviewMode = true }
-                        .background(
-                            if (isPreviewMode) GrimoireColors.GoldPrimary else Color.Transparent,
-                            RoundedCornerShape(3.dp)
-                        )
-                        .padding(horizontal = 12.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        "Preview",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (isPreviewMode) GrimoireColors.Background else GrimoireColors.ParchmentMuted
-                    )
-                }
-            }
         }
 
         GrimoireDivider()
 
         val focusRequester = remember { FocusRequester() }
+        val verticalScrollState = rememberScrollState()
 
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(verticalScrollState)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
                 ) {
-                    if (!isPreviewMode) {
-                        focusRequester.requestFocus()
-                        val targetLen = textFieldValue.text.length
-                        textFieldValue = textFieldValue.copy(
-                            selection = androidx.compose.ui.text.TextRange(targetLen)
-                        )
-                    }
+                    focusRequester.requestFocus()
                 }
                 .padding(16.dp)
         ) {
-            if (isPreviewMode) {
-                MarkdownPreview(content, entities, onOpenEntityPopout)
-            } else {
-                MarkdownEdit(
-                    textFieldValue = textFieldValue,
-                    entities = entities,
-                    onOpenEntityPopout = onOpenEntityPopout,
-                    focusRequester = focusRequester,
-                    onValueChange = { newValue ->
-                        var updatedSelection = newValue.selection
-                        val text = newValue.text
-
-                        if (!updatedSelection.collapsed) {
-                            val before = text.substring(0, updatedSelection.min)
-                            val after = text.substring(updatedSelection.max)
-                            
-                            if (before.endsWith("**") && after.startsWith("**")) {
-                                updatedSelection = androidx.compose.ui.text.TextRange(updatedSelection.min - 2, updatedSelection.max + 2)
-                            } else if (before.endsWith("__") && after.startsWith("__")) {
-                                updatedSelection = androidx.compose.ui.text.TextRange(updatedSelection.min - 2, updatedSelection.max + 2)
-                            } else if (before.endsWith("*") && after.startsWith("*") && !before.endsWith("**") && !after.startsWith("**")) {
-                                updatedSelection = androidx.compose.ui.text.TextRange(updatedSelection.min - 1, updatedSelection.max + 1)
-                            } else if (before.endsWith("@[") && after.startsWith("]")) {
-                                updatedSelection = androidx.compose.ui.text.TextRange(updatedSelection.min - 2, updatedSelection.max + 1)
-                            }
-                        }
-
-                        val finalValue = newValue.copy(selection = updatedSelection)
-                        
-                        textFieldValue = finalValue
-                        if (finalValue.text != content) {
-                            onContentChange(finalValue.text)
-                        }
-                    },
-                    onFormat = { applyFormat(it) }
-                )
-            }
+            MarkdownEdit(
+                textFieldValue = textFieldValue,
+                entities = entities,
+                onOpenEntityPopout = onOpenEntityPopout,
+                focusRequester = focusRequester,
+                onValueChange = { newValue ->
+                    val updatedSelection = expandMarkdownTokenSelection(newValue.text, newValue.selection)
+                    val finalValue = newValue.copy(selection = updatedSelection)
+                    
+                    textFieldValue = finalValue
+                    if (finalValue.text != content) {
+                        onContentChange(finalValue.text)
+                    }
+                },
+                onFormat = { applyFormat(it) }
+            )
         }
     }
 }
 
+@OptIn(ExperimentalComposeUiApi::class, ExperimentalFoundationApi::class)
 @Composable
 private fun MarkdownEdit(
     textFieldValue: TextFieldValue,
@@ -283,17 +268,52 @@ private fun MarkdownEdit(
     val primaryColor = GrimoireColors.GoldPrimary
     val fantasyFamily = LocalFantasyFontFamily.current
 
-    val markdownTransformation = remember(primaryColor, textFieldValue.selection, entities, fantasyFamily) {
-        object : VisualTransformation {
-            override fun filter(text: AnnotatedString): TransformedText {
-                val (annotated, mapping) = parseMarkdown(text.text, primaryColor, textFieldValue.selection, entities, fantasyFamily)
-                return TransformedText(annotated, mapping)
-            }
+    val (annotatedText, currentOffsetMapping) = remember(
+        primaryColor,
+        textFieldValue.text,
+        textFieldValue.selection,
+        entities,
+        fantasyFamily
+    ) {
+        parseMarkdown(textFieldValue.text, primaryColor, textFieldValue.selection, entities, fantasyFamily)
+    }
+
+    val markdownTransformation = remember(annotatedText, currentOffsetMapping) {
+        VisualTransformation {
+            TransformedText(annotatedText, currentOffsetMapping)
         }
     }
 
     var dropdownQuery by remember { mutableStateOf<String?>(null) }
     var dropdownStartOffset by remember { mutableStateOf(-1) }
+    var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+
+    // Sticky-X state for reliable vertical arrow navigation across lines of varying lengths
+    var stickyX by remember { mutableStateOf<Float?>(null) }
+    var lastVerticalText by remember { mutableStateOf<String?>(null) }
+    var lastVerticalSelection by remember { mutableStateOf<TextRange?>(null) }
+    val bringIntoViewRequester = remember { BringIntoViewRequester() }
+    var scrollToCursorTrigger by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(scrollToCursorTrigger) {
+        if (scrollToCursorTrigger > 0) {
+            // Wait one frame so onTextLayout reflects any expanded/collapsed syntax on the target line
+            withFrameNanos { }
+            val layout = textLayoutResult ?: return@LaunchedEffect
+            val activeOrig = textFieldValue.selection.end.coerceIn(0, textFieldValue.text.length)
+            val activeTrans = currentOffsetMapping
+                .originalToTransformed(activeOrig)
+                .coerceIn(0, annotatedText.length)
+            val cursorRect = layout.getCursorRect(activeTrans)
+            val paddedRect = Rect(
+                left = cursorRect.left,
+                top = (cursorRect.top - 12f).coerceAtLeast(0f),
+                right = cursorRect.right + 4f,
+                bottom = cursorRect.bottom + 12f
+            )
+            bringIntoViewRequester.bringIntoView(paddedRect)
+        }
+    }
     
     LaunchedEffect(textFieldValue.text, textFieldValue.selection) {
         val cursor = textFieldValue.selection.start
@@ -320,8 +340,29 @@ private fun MarkdownEdit(
                 indication = null
             ) {
                 focusRequester.requestFocus()
-                val targetLen = textFieldValue.text.length
-                onValueChange(textFieldValue.copy(selection = androidx.compose.ui.text.TextRange(targetLen)))
+            }
+            .onPointerEvent(PointerEventType.Press) { event ->
+                stickyX = null
+                lastVerticalSelection = null
+                val isCtrl = event.keyboardModifiers.isCtrlPressed || event.keyboardModifiers.isMetaPressed
+                if (isCtrl && event.button == PointerButton.Primary) {
+                    val clickPos = event.changes.firstOrNull()?.position
+                    val layout = textLayoutResult
+                    if (clickPos != null && layout != null) {
+                        val transOffset = layout.getOffsetForPosition(clickPos)
+                        val origOffset = currentOffsetMapping.transformedToOriginal(transOffset)
+                        val entityMatch = ENTITY_MENTION_REGEX.findAll(textFieldValue.text)
+                            .find { origOffset in it.range.first..(it.range.last + 1) }
+                        if (entityMatch != null) {
+                            val entId = entityMatch.groups[1]!!.value
+                            val ent = entities.find { it.id == entId }
+                            if (ent != null) {
+                                onOpenEntityPopout(ent.name)
+                                event.changes.forEach { it.consume() }
+                            }
+                        }
+                    }
+                }
             }
     ) {
         ContextMenuDataProvider(
@@ -333,15 +374,29 @@ private fun MarkdownEdit(
                 )
                 
                 val text = textFieldValue.text
-                val uniqueEntities = Regex("(?<!\\\\)@\\[(.*?)\\]").findAll(text).map { it.groups[1]!!.value }.toSet()
+                val curOffset = textFieldValue.selection.start
                 
-                if (uniqueEntities.isNotEmpty()) {
-                    uniqueEntities.forEach { entityId ->
-                        val ent = entities.find { it.id == entityId }
-                        if (ent != null) {
-                            items.add(0, ContextMenuItem("Open Entity '${ent.name}'") {
-                                onOpenEntityPopout(ent.name)
-                            })
+                // If cursor is on a specific entity, put it first in the context menu
+                val activeEntityMatch = ENTITY_MENTION_REGEX.findAll(text)
+                    .find { curOffset in it.range.first..(it.range.last + 1) }
+                if (activeEntityMatch != null) {
+                    val entId = activeEntityMatch.groups[1]!!.value
+                    val ent = entities.find { it.id == entId }
+                    if (ent != null) {
+                        items.add(0, ContextMenuItem("Open Entity '${ent.name}'") {
+                            onOpenEntityPopout(ent.name)
+                        })
+                    }
+                } else {
+                    val uniqueEntities = ENTITY_MENTION_REGEX.findAll(text).map { it.groups[1]!!.value }.toSet()
+                    if (uniqueEntities.isNotEmpty()) {
+                        uniqueEntities.forEach { entityId ->
+                            val ent = entities.find { it.id == entityId }
+                            if (ent != null) {
+                                items.add(0, ContextMenuItem("Open Entity '${ent.name}'") {
+                                    onOpenEntityPopout(ent.name)
+                                })
+                            }
                         }
                     }
                 }
@@ -352,7 +407,62 @@ private fun MarkdownEdit(
             BasicTextField(
                 value = textFieldValue,
                 onValueChange = onValueChange,
-                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+                onTextLayout = { textLayoutResult = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focusRequester)
+                    .bringIntoViewRequester(bringIntoViewRequester)
+                    .onPreviewKeyEvent { keyEvent ->
+                        if (keyEvent.type != KeyEventType.KeyDown) {
+                            return@onPreviewKeyEvent false
+                        }
+
+                        val key = keyEvent.key
+                        val hasCommandModifier = keyEvent.isCtrlPressed || keyEvent.isAltPressed || keyEvent.isMetaPressed
+
+                        if (!hasCommandModifier && (key == Key.DirectionUp || key == Key.DirectionDown)) {
+                            val layout = textLayoutResult ?: return@onPreviewKeyEvent false
+                            val direction = if (key == Key.DirectionUp) -1 else 1
+                            val validStickyX = if (
+                                textFieldValue.text == lastVerticalText &&
+                                textFieldValue.selection == lastVerticalSelection
+                            ) {
+                                stickyX
+                            } else {
+                                null
+                            }
+
+                            val moveResult = calculateVerticalMove(
+                                originalText = textFieldValue.text,
+                                transformedText = annotatedText.text,
+                                currentSelection = textFieldValue.selection,
+                                direction = direction,
+                                extendSelection = keyEvent.isShiftPressed,
+                                cachedStickyX = validStickyX,
+                                layout = layout.asVerticalTextLayout(),
+                                offsetMapping = currentOffsetMapping
+                            )
+
+                            val finalSelection = expandMarkdownTokenSelection(textFieldValue.text, moveResult.selection)
+                            stickyX = moveResult.stickyX
+                            lastVerticalText = textFieldValue.text
+                            lastVerticalSelection = finalSelection
+                            onValueChange(textFieldValue.copy(selection = finalSelection))
+                            scrollToCursorTrigger++
+                            true
+                        } else {
+                            val isModifierOnly = key == Key.ShiftLeft || key == Key.ShiftRight ||
+                                key == Key.CtrlLeft || key == Key.CtrlRight ||
+                                key == Key.AltLeft || key == Key.AltRight ||
+                                key == Key.MetaLeft || key == Key.MetaRight ||
+                                key == Key.CapsLock
+                            if (!isModifierOnly) {
+                                stickyX = null
+                                lastVerticalSelection = null
+                            }
+                            false
+                        }
+                    },
                 textStyle = TextStyle(
                     color = GrimoireColors.ParchmentLight,
                     fontSize = 16.sp,
@@ -388,7 +498,7 @@ private fun MarkdownEdit(
                                         val before = text.substring(0, dropdownStartOffset - 1) // include @
                                         val after = text.substring(textFieldValue.selection.start)
                                         val newContent = "$before@[${ent.id}]$after"
-                                        val newSelection = androidx.compose.ui.text.TextRange(before.length + ent.id.length + 3)
+                                        val newSelection = TextRange(before.length + ent.id.length + 3)
                                         onValueChange(TextFieldValue(newContent, newSelection))
                                     }
                                     .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -409,62 +519,186 @@ private fun MarkdownEdit(
     }
 }
 
-@Composable
-private fun MarkdownPreview(content: String, entities: List<Entity>, onOpenEntityPopout: (String) -> Unit) {
-    val primaryColor = GrimoireColors.GoldPrimary
-    val fantasyFamily = LocalFantasyFontFamily.current
-    val (baseAnnotatedString, _) = remember(content, primaryColor, entities, fantasyFamily) {
-        parseMarkdown(content, primaryColor, null, entities, fantasyFamily) // null selection hides all syntax
-    }
-    
-    val finalAnnotatedString = remember(baseAnnotatedString, entities, primaryColor, onOpenEntityPopout) {
-        val builder = AnnotatedString.Builder(baseAnnotatedString)
-        baseAnnotatedString.getStringAnnotations("entity", 0, baseAnnotatedString.length).forEach { annotation ->
-            val entityId = annotation.item
-            val ent = entities.find { it.id == entityId }
-            val color = if (ent?.color != null) {
-                try { Color(ent.color.toULong()) } catch(e: Exception) { primaryColor }
-            } else primaryColor
+internal val ENTITY_MENTION_REGEX = Regex("(?<!\\\\)@\\[(.*?)\\]")
 
-            builder.addLink(
-                androidx.compose.ui.text.LinkAnnotation.Clickable(
-                    tag = entityId,
-                    styles = androidx.compose.ui.text.TextLinkStyles(
-                        style = SpanStyle(
-                            color = color,
-                            fontWeight = FontWeight.Bold,
-                            textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
-                        )
-                    ),
-                    linkInteractionListener = {
-                        if (ent != null) {
-                            onOpenEntityPopout(ent.name)
-                        }
-                    }
-                ),
-                annotation.start,
-                annotation.end
-            )
-        }
-        builder.toAnnotatedString()
+internal fun isEntityExpanded(matchRange: IntRange, cursorSelection: TextRange?): Boolean {
+    if (cursorSelection == null) return false
+    return (cursorSelection.min > matchRange.first && cursorSelection.max <= matchRange.last) ||
+        (cursorSelection.min <= matchRange.first && cursorSelection.max > matchRange.last) ||
+        (!cursorSelection.collapsed && cursorSelection.min <= matchRange.last && cursorSelection.max >= matchRange.first)
+}
+
+internal fun expandMarkdownTokenSelection(text: String, selection: TextRange): TextRange {
+    if (selection.collapsed) return selection
+    val min = selection.min.coerceIn(0, text.length)
+    val max = selection.max.coerceIn(0, text.length)
+    val before = text.substring(0, min)
+    val after = text.substring(max)
+
+    fun expandPreservingDirection(leftDelta: Int, rightDelta: Int): TextRange {
+        val newMin = min - leftDelta
+        val newMax = max + rightDelta
+        return if (selection.reversed) TextRange(newMax, newMin) else TextRange(newMin, newMax)
     }
 
-    GrimoireVellumTomePage {
-        Text(
-            text = finalAnnotatedString,
-            style = TextStyle(
-                color = GrimoireColors.ParchmentLight,
-                fontSize = 16.sp,
-                lineHeight = 26.sp
-            )
-        )
+    return when {
+        before.endsWith("**") && after.startsWith("**") -> expandPreservingDirection(2, 2)
+        before.endsWith("__") && after.startsWith("__") -> expandPreservingDirection(2, 2)
+        before.endsWith("*") && after.startsWith("*") && !before.endsWith("**") && !after.startsWith("**") ->
+            expandPreservingDirection(1, 1)
+        before.endsWith("@[") && after.startsWith("]") -> expandPreservingDirection(2, 1)
+        else -> selection
     }
 }
 
-private fun parseMarkdown(
+internal interface VerticalTextLayout {
+    val lineCount: Int
+    fun getLineForOffset(offset: Int): Int
+    fun getCursorHorizontal(offset: Int): Float
+    fun getLineLeft(lineIndex: Int): Float
+    fun getLineRight(lineIndex: Int): Float
+    fun getLineTop(lineIndex: Int): Float
+    fun getLineBottom(lineIndex: Int): Float
+    fun getLineStart(lineIndex: Int): Int
+    fun getLineEnd(lineIndex: Int, visibleEnd: Boolean): Int
+    fun getOffsetForPosition(x: Float, y: Float): Int
+}
+
+internal fun TextLayoutResult.asVerticalTextLayout(): VerticalTextLayout = object : VerticalTextLayout {
+    override val lineCount: Int get() = this@asVerticalTextLayout.lineCount
+    override fun getLineForOffset(offset: Int): Int = this@asVerticalTextLayout.getLineForOffset(offset)
+    override fun getCursorHorizontal(offset: Int): Float = this@asVerticalTextLayout.getCursorRect(offset).left
+    override fun getLineLeft(lineIndex: Int): Float = this@asVerticalTextLayout.getLineLeft(lineIndex)
+    override fun getLineRight(lineIndex: Int): Float = this@asVerticalTextLayout.getLineRight(lineIndex)
+    override fun getLineTop(lineIndex: Int): Float = this@asVerticalTextLayout.getLineTop(lineIndex)
+    override fun getLineBottom(lineIndex: Int): Float = this@asVerticalTextLayout.getLineBottom(lineIndex)
+    override fun getLineStart(lineIndex: Int): Int = this@asVerticalTextLayout.getLineStart(lineIndex)
+    override fun getLineEnd(lineIndex: Int, visibleEnd: Boolean): Int =
+        this@asVerticalTextLayout.getLineEnd(lineIndex, visibleEnd)
+    override fun getOffsetForPosition(x: Float, y: Float): Int =
+        this@asVerticalTextLayout.getOffsetForPosition(Offset(x, y))
+}
+
+internal data class VerticalMoveResult(
+    val selection: TextRange,
+    val stickyX: Float
+)
+
+internal fun calculateVerticalMove(
+    originalText: String,
+    transformedText: String,
+    currentSelection: TextRange,
+    direction: Int,
+    extendSelection: Boolean,
+    cachedStickyX: Float?,
+    layout: VerticalTextLayout,
+    offsetMapping: OffsetMapping
+): VerticalMoveResult {
+    require(direction == -1 || direction == 1) { "direction must be -1 or +1" }
+
+    if (originalText.isEmpty() || layout.lineCount <= 0) {
+        return VerticalMoveResult(TextRange(0), cachedStickyX ?: 0f)
+    }
+
+    val activeOrigOffset = when {
+        extendSelection -> currentSelection.end
+        !currentSelection.collapsed -> if (direction < 0) currentSelection.min else currentSelection.max
+        else -> currentSelection.end
+    }.coerceIn(0, originalText.length)
+
+    val currentTransOffset = offsetMapping.originalToTransformed(activeOrigOffset)
+        .coerceIn(0, transformedText.length)
+
+    val desiredX = cachedStickyX ?: layout.getCursorHorizontal(currentTransOffset)
+    val currentLine = layout.getLineForOffset(currentTransOffset)
+
+    // Exit a soft-wrapped expanded @[entityId] link in a single vertical press
+    val activeEntityMatch = ENTITY_MENTION_REGEX.findAll(originalText).find { match ->
+        isEntityExpanded(match.range, currentSelection) &&
+            activeOrigOffset in match.range.first..(match.range.last + 1)
+    }
+
+    val targetLine = if (activeEntityMatch != null) {
+        val transEntityStart = offsetMapping.originalToTransformed(activeEntityMatch.range.first)
+            .coerceIn(0, transformedText.length)
+        val transEntityLastChar = offsetMapping.originalToTransformed(activeEntityMatch.range.last)
+            .coerceIn(0, transformedText.length)
+        val entityStartLine = layout.getLineForOffset(transEntityStart)
+        val entityEndLine = layout.getLineForOffset(transEntityLastChar)
+        if (entityStartLine < entityEndLine) {
+            if (direction < 0) entityStartLine - 1 else entityEndLine + 1
+        } else {
+            currentLine + direction
+        }
+    } else {
+        currentLine + direction
+    }
+
+    val newOrigOffset = when {
+        targetLine < 0 -> 0
+        targetLine >= layout.lineCount -> originalText.length
+        else -> {
+            val lineLeft = layout.getLineLeft(targetLine)
+            val lineRight = layout.getLineRight(targetLine)
+
+            val targetTransOffset = when {
+                desiredX >= lineRight -> resolveVisualLineEndOffset(transformedText, layout, targetLine)
+                desiredX <= lineLeft -> layout.getLineStart(targetLine)
+                else -> {
+                    val centerY = (layout.getLineTop(targetLine) + layout.getLineBottom(targetLine)) / 2f
+                    layout.getOffsetForPosition(desiredX, centerY)
+                }
+            }.coerceIn(0, transformedText.length)
+
+            offsetMapping.transformedToOriginal(targetTransOffset).coerceIn(0, originalText.length)
+        }
+    }
+
+    val newSelection = if (extendSelection) {
+        TextRange(currentSelection.start, newOrigOffset)
+    } else {
+        TextRange(newOrigOffset)
+    }
+
+    return VerticalMoveResult(selection = newSelection, stickyX = desiredX)
+}
+
+private fun resolveVisualLineEndOffset(
+    transformedText: String,
+    layout: VerticalTextLayout,
+    targetLine: Int
+): Int {
+    val lineStart = layout.getLineStart(targetLine)
+    val rawEnd = layout.getLineEnd(targetLine, visibleEnd = false)
+
+    if (rawEnd <= lineStart) {
+        return lineStart
+    }
+
+    if (rawEnd <= transformedText.length && transformedText[rawEnd - 1] == '\n') {
+        var endBeforeNewline = rawEnd - 1
+        if (endBeforeNewline > lineStart && transformedText[endBeforeNewline - 1] == '\r') {
+            endBeforeNewline -= 1
+        }
+        return endBeforeNewline
+    }
+
+    if (targetLine == layout.lineCount - 1) {
+        return rawEnd.coerceAtMost(transformedText.length)
+    }
+
+    val visibleEnd = layout.getLineEnd(targetLine, visibleEnd = true)
+    return if (visibleEnd < rawEnd) {
+        visibleEnd.coerceAtLeast(lineStart)
+    } else {
+        (rawEnd - 1).coerceAtLeast(lineStart)
+    }
+}
+
+internal fun parseMarkdown(
     text: String,
     primaryColor: Color,
-    cursorSelection: androidx.compose.ui.text.TextRange?,
+    cursorSelection: TextRange?,
     entities: List<Entity> = emptyList(),
     fantasyFamily: FontFamily = FontFamily.Serif
 ): Pair<AnnotatedString, OffsetMapping> {
@@ -475,12 +709,22 @@ private fun parseMarkdown(
 
     var cursor = 0
 
+    // Token-level focus: check if cursor is touching or inside inline formatting range
     fun isCursorInside(range: IntRange): Boolean {
         if (cursorSelection == null) return false
-        return cursorSelection.start <= range.last + 1 && cursorSelection.end >= range.first - 1
+        return cursorSelection.min <= range.last && cursorSelection.max >= range.first
     }
 
-    val regex = Regex("\\*\\*(.*?)\\*\\*|(?<!\\*)\\*(?!\\*)(.*?)(?<!\\*)\\*(?!\\*)|__(.*?)__|(?<!\\\\)@\\[(.*?)\\]|^(#{1,6}) (.*)$", RegexOption.MULTILINE)
+    // Line-level focus: check if cursor is anywhere on the line of a block element (e.g. heading)
+    fun isCursorInLine(range: IntRange): Boolean {
+        if (cursorSelection == null) return false
+        return cursorSelection.min <= range.last + 1 && cursorSelection.max >= range.first
+    }
+
+    val regex = Regex(
+        "\\*\\*(.*?)\\*\\*|(?<!\\*)\\*(?!\\*)(.*?)(?<!\\*)\\*(?!\\*)|__(.*?)__|(?<!\\\\)@\\[(.*?)\\]|^(#{1,6}) (.*)$",
+        RegexOption.MULTILINE
+    )
     
     val matches = regex.findAll(text)
 
@@ -493,14 +737,13 @@ private fun parseMarkdown(
         }
         
         cursor = match.range.last + 1
-
-        val isCursorIn = isCursorInside(match.range)
         val origStart = match.range.first
 
         if (match.value.startsWith("**")) {
             val content = match.groups[1]!!.value
+            val isCursorIn = isCursorInside(match.range)
             if (!isCursorIn) {
-                // hide **
+                // Hide leading **
                 origToTrans.add(builder.length)
                 origToTrans.add(builder.length)
                 val transStart = builder.length
@@ -509,9 +752,14 @@ private fun parseMarkdown(
                     builder.append(content[i])
                     transToOrig.add(origStart + 2 + i)
                 }
+                // Hide trailing **
                 origToTrans.add(builder.length)
                 origToTrans.add(builder.length)
-                builder.addStyle(SpanStyle(fontWeight = FontWeight.Bold, color = GrimoireColors.ParchmentLight), transStart, builder.length)
+                builder.addStyle(
+                    SpanStyle(fontWeight = FontWeight.Bold, color = GrimoireColors.ParchmentLight),
+                    transStart,
+                    builder.length
+                )
             } else {
                 val transStart = builder.length
                 for (i in match.range) {
@@ -523,7 +771,9 @@ private fun parseMarkdown(
             }
         } else if (match.value.startsWith("__")) {
             val content = match.groups[3]!!.value
+            val isCursorIn = isCursorInside(match.range)
             if (!isCursorIn) {
+                // Hide leading __
                 origToTrans.add(builder.length)
                 origToTrans.add(builder.length)
                 val transStart = builder.length
@@ -532,9 +782,14 @@ private fun parseMarkdown(
                     builder.append(content[i])
                     transToOrig.add(origStart + 2 + i)
                 }
+                // Hide trailing __
                 origToTrans.add(builder.length)
                 origToTrans.add(builder.length)
-                builder.addStyle(SpanStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline), transStart, builder.length)
+                builder.addStyle(
+                    SpanStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline),
+                    transStart,
+                    builder.length
+                )
             } else {
                 val transStart = builder.length
                 for (i in match.range) {
@@ -542,11 +797,17 @@ private fun parseMarkdown(
                     builder.append(text[i])
                     transToOrig.add(i)
                 }
-                builder.addStyle(SpanStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline), transStart, builder.length)
+                builder.addStyle(
+                    SpanStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline),
+                    transStart,
+                    builder.length
+                )
             }
         } else if (match.value.startsWith("*") && !match.value.startsWith("**")) {
             val content = match.groups[2]!!.value
+            val isCursorIn = isCursorInside(match.range)
             if (!isCursorIn) {
+                // Hide leading *
                 origToTrans.add(builder.length)
                 val transStart = builder.length
                 for (i in content.indices) {
@@ -554,8 +815,13 @@ private fun parseMarkdown(
                     builder.append(content[i])
                     transToOrig.add(origStart + 1 + i)
                 }
+                // Hide trailing *
                 origToTrans.add(builder.length)
-                builder.addStyle(SpanStyle(fontStyle = FontStyle.Italic), transStart, builder.length)
+                builder.addStyle(
+                    SpanStyle(fontStyle = FontStyle.Italic),
+                    transStart,
+                    builder.length
+                )
             } else {
                 val transStart = builder.length
                 for (i in match.range) {
@@ -563,7 +829,11 @@ private fun parseMarkdown(
                     builder.append(text[i])
                     transToOrig.add(i)
                 }
-                builder.addStyle(SpanStyle(fontStyle = FontStyle.Italic), transStart, builder.length)
+                builder.addStyle(
+                    SpanStyle(fontStyle = FontStyle.Italic),
+                    transStart,
+                    builder.length
+                )
             }
         } else if (match.value.startsWith("@[") || match.value.startsWith("\\@[")) {
             val isEscaped = match.value.startsWith("\\")
@@ -572,22 +842,35 @@ private fun parseMarkdown(
                 val id = idGroup.value
                 val ent = entities.find { it.id == id }
                 val color = if (ent?.color != null) {
-                    try { Color(ent.color.toULong()) } catch(e: Exception) { primaryColor }
+                    try { Color(ent.color.toULong()) } catch (e: Exception) { primaryColor }
                 } else GrimoireColors.CrimsonError
                 
                 val displayText = ent?.name ?: "Unknown Entity"
+                // An entity reference @[id] is expanded when the cursor is strictly inside the token or selecting it
+                val isCursorIn = isEntityExpanded(match.range, cursorSelection)
 
                 if (!isCursorIn) {
-                    for (i in match.range) {
-                        origToTrans.add(builder.length)
-                    }
                     val transStart = builder.length
-                    for (i in displayText.indices) {
-                        builder.append(displayText[i])
-                        transToOrig.add(match.range.last)
+
+                    for (i in match.range) {
+                        origToTrans.add(transStart)
                     }
 
-                    builder.addStyle(SpanStyle(color = color, fontWeight = FontWeight.Bold, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline), transStart, builder.length)
+                    for (i in displayText.indices) {
+                        val mappedOrig = if (i == 0) match.range.first else match.range.first + 1
+                        builder.append(displayText[i])
+                        transToOrig.add(mappedOrig)
+                    }
+
+                    builder.addStyle(
+                        SpanStyle(
+                            color = color,
+                            fontWeight = FontWeight.Bold,
+                            textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
+                        ),
+                        transStart,
+                        builder.length
+                    )
                     builder.addStringAnnotation("entity", id, transStart, builder.length)
                 } else {
                     val transStart = builder.length
@@ -596,7 +879,15 @@ private fun parseMarkdown(
                         builder.append(text[i])
                         transToOrig.add(i)
                     }
-                    builder.addStyle(SpanStyle(color = color, fontWeight = FontWeight.Bold, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline), transStart, builder.length)
+                    builder.addStyle(
+                        SpanStyle(
+                            color = color,
+                            fontWeight = FontWeight.Bold,
+                            textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
+                        ),
+                        transStart,
+                        builder.length
+                    )
                     builder.addStringAnnotation("entity", id, transStart, builder.length)
                 }
             } else {
@@ -614,15 +905,19 @@ private fun parseMarkdown(
                 2 -> 22.sp
                 else -> 18.sp
             }
-            if (cursorSelection == null) {
-                for (i in 0..hashes.length) {
-                    origToTrans.add(builder.length)
-                }
+            val prefixLen = hashes.length + 1 // hashes plus space
+            val isCursorOnLine = isCursorInLine(match.range)
+
+            if (!isCursorOnLine) {
+                // Hide '# ' prefix when cursor is not on the heading line
                 val transStart = builder.length
+                for (i in 0 until prefixLen) {
+                    origToTrans.add(transStart)
+                }
                 for (i in content.indices) {
                     origToTrans.add(builder.length)
                     builder.append(content[i])
-                    transToOrig.add(origStart + hashes.length + 1 + i)
+                    transToOrig.add(origStart + prefixLen + i)
                 }
                 builder.addStyle(
                     SpanStyle(
@@ -635,6 +930,7 @@ private fun parseMarkdown(
                     builder.length
                 )
             } else {
+                // Reveal '# ' prefix when cursor is on the heading line
                 val transStart = builder.length
                 for (i in match.range) {
                     origToTrans.add(builder.length)
@@ -665,8 +961,11 @@ private fun parseMarkdown(
     transToOrig.add(text.length)
 
     val offsetMapping = object : OffsetMapping {
-        override fun originalToTransformed(offset: Int): Int = origToTrans[offset.coerceIn(0, text.length)]
-        override fun transformedToOriginal(offset: Int): Int = transToOrig[offset.coerceIn(0, transToOrig.size - 1)]
+        override fun originalToTransformed(offset: Int): Int =
+            origToTrans[offset.coerceIn(0, origToTrans.size - 1)]
+
+        override fun transformedToOriginal(offset: Int): Int =
+            transToOrig[offset.coerceIn(0, transToOrig.size - 1)]
     }
 
     return Pair(builder.toAnnotatedString(), offsetMapping)
