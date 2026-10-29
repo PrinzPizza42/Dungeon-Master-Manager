@@ -8,11 +8,33 @@ import de.luca.dungeon_master_manager.data.FileNode
 import de.luca.dungeon_master_manager.data.FileService
 import de.luca.dungeon_master_manager.data.MapData
 import de.luca.dungeon_master_manager.data.ProjectInfo
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.io.File
+
+enum class ConflictAction { OVERWRITE, RENAME, SKIP }
+data class ConflictDecision(val action: ConflictAction, val applyToAll: Boolean)
+
+data class FileConflictPrompt(
+    val fileName: String,
+    val targetFolderDisplayName: String,
+    val remainingFilesCount: Int,
+    val onDecision: (ConflictDecision) -> Unit,
+    val onCancelBatch: () -> Unit,
+)
+
+data class ExplorerDropNotice(
+    val message: String,
+    val isWarning: Boolean = true,
+)
 
 class ProjectEditorViewModel(
     val project: ProjectInfo,
@@ -47,14 +69,49 @@ class ProjectEditorViewModel(
     private val _entityColors = MutableStateFlow<Map<String, String>>(emptyMap())
     val entityColors: StateFlow<Map<String, String>> = _entityColors
 
+    // Conflict & Drop notices
+    private val _pendingConflict = MutableStateFlow<FileConflictPrompt?>(null)
+    val pendingConflict: StateFlow<FileConflictPrompt?> = _pendingConflict
+
+    private val _dropNotice = MutableStateFlow<ExplorerDropNotice?>(null)
+    val dropNotice: StateFlow<ExplorerDropNotice?> = _dropNotice
+
+    private var noticeDismissJob: Job? = null
+
     init {
         loadFileTree()
         loadEntityColors()
     }
 
+    fun showDropNotice(message: String, isWarning: Boolean = true) {
+        noticeDismissJob?.cancel()
+        _dropNotice.value = ExplorerDropNotice(message, isWarning)
+        noticeDismissJob = viewModelScope.launch {
+            delay(4500)
+            _dropNotice.value = null
+        }
+    }
+
+    fun dismissDropNotice() {
+        noticeDismissJob?.cancel()
+        _dropNotice.value = null
+    }
+
+    fun expandTargetDir(targetDirPath: String) {
+        val pathsToAdd = mutableSetOf<String>()
+        var current: File? = File(targetDirPath)
+        val rootCanonical = try { File(project.path).canonicalFile } catch (_: Exception) { File(project.path) }
+        while (current != null) {
+            pathsToAdd.add(current.absolutePath)
+            if (try { current.canonicalFile == rootCanonical } catch (_: Exception) { false }) break
+            current = current.parentFile
+        }
+        _expandedPaths.value = _expandedPaths.value + pathsToAdd
+    }
+
     fun loadEntityColors() {
         viewModelScope.launch {
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            withContext(Dispatchers.IO) {
                 val db = de.luca.dungeon_master_manager.data.DatabaseHelper.getProjectDatabase(project.path)
                 val globalDb = de.luca.dungeon_master_manager.data.DatabaseHelper.globalDatabase
                 
@@ -81,6 +138,27 @@ class ProjectEditorViewModel(
             _fileTree.value = tree
             // Auto-expand the root
             _expandedPaths.value = _expandedPaths.value + tree.path
+
+            // Clean up any open tabs or popped-out tabs whose files no longer exist on disk
+            val missingTabs = _openTabs.value.filterNot { File(it.filePath).exists() }
+            for (missing in missingTabs) {
+                closeTab(missing.filePath)
+            }
+            val missingPopped = _poppedOutTabs.value.filterNot { File(it.tab.filePath).exists() }
+            for (missing in missingPopped) {
+                closePoppedOutTab(missing.tab.filePath)
+            }
+        }
+    }
+
+    fun onDragTransferCompleted(filePath: String) {
+        viewModelScope.launch {
+            delay(150)
+            loadFileTree()
+            if (!File(filePath).exists()) {
+                closeTab(filePath)
+                closePoppedOutTab(filePath)
+            }
         }
     }
 
@@ -114,7 +192,7 @@ class ProjectEditorViewModel(
         } else {
             node.path
         }
-        val actualName = if (node.isVirtualHeading) actualPath.substringAfterLast(java.io.File.separator) else node.name
+        val actualName = if (node.isVirtualHeading) actualPath.substringAfterLast(File.separator) else node.name
         val actualExtension = if (node.isVirtualHeading) "md" else node.extension
 
         // Check if already popped out, focus it if so
@@ -154,7 +232,7 @@ class ProjectEditorViewModel(
         } else {
             node.path
         }
-        val actualName = if (node.isVirtualHeading) actualPath.substringAfterLast(java.io.File.separator) else node.name
+        val actualName = if (node.isVirtualHeading) actualPath.substringAfterLast(File.separator) else node.name
         val actualExtension = if (node.isVirtualHeading) "md" else node.extension
 
         // Check if it's already popped out
@@ -212,19 +290,19 @@ class ProjectEditorViewModel(
         }
     }
 
-    private var saveJob: kotlinx.coroutines.Job? = null
+    private var saveJob: Job? = null
 
     /** Update file content and auto-save after debounce */
     fun updateActiveFileContent(newContent: String) {
         val activePath = _activeTabPath.value ?: return
         val ext = activePath.substringAfterLast('.', "").lowercase()
-        if (FileExtensions.isImage(ext)) return
+        if (!FileExtensions.isEditableText(ext)) return
 
         _activeFileContent.value = newContent
 
         saveJob?.cancel()
         saveJob = viewModelScope.launch {
-            kotlinx.coroutines.delay(500) // Debounce 500ms
+            delay(500) // Debounce 500ms
             try {
                 fileService.writeFile(activePath, newContent)
                 // If its a story file, reload tree to update outline
@@ -251,7 +329,7 @@ class ProjectEditorViewModel(
                         saveJob?.cancel()
                         val updatedJson = json.encodeToString(mapData.copy(markers = remainingMarkers))
                         _activeFileContent.value = updatedJson
-                        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        viewModelScope.launch(Dispatchers.IO) {
                             try {
                                 fileService.writeFile(activePath, updatedJson)
                             } catch (e: Exception) {
@@ -268,8 +346,8 @@ class ProjectEditorViewModel(
 
     private fun loadFileContent(filePath: String) {
         val ext = filePath.substringAfterLast('.', "").lowercase()
-        if (FileExtensions.isImage(ext)) {
-            // Binary images are rendered by ImageViewer directly from disk
+        if (!FileExtensions.isEditableText(ext)) {
+            // Binary or non-editable files are not read into text memory
             _activeFileContent.value = ""
             _isLoadingContent.value = false
             return
@@ -292,8 +370,8 @@ class ProjectEditorViewModel(
         viewModelScope.launch {
             try {
                 val safeName = if (fileName.contains(".")) fileName else "$fileName.md"
-                val folderPath = "${project.path}${java.io.File.separator}$folderName"
-                val newFile = java.io.File(folderPath, safeName)
+                val folderPath = "${project.path}${File.separator}$folderName"
+                val newFile = File(folderPath, safeName)
                 
                 if (!newFile.exists()) {
                     newFile.parentFile?.mkdirs()
@@ -310,7 +388,7 @@ class ProjectEditorViewModel(
                     loadFileTree()
                     
                     // Switch to the newly created file tab
-                    val newNode = de.luca.dungeon_master_manager.data.FileNode(
+                    val newNode = FileNode(
                         name = newFile.name,
                         path = newFile.absolutePath,
                         isDirectory = false
@@ -323,10 +401,10 @@ class ProjectEditorViewModel(
         }
     }
 
-    fun deleteFile(node: de.luca.dungeon_master_manager.data.FileNode) {
+    fun deleteFile(node: FileNode) {
         viewModelScope.launch {
             try {
-                val file = java.io.File(node.path)
+                val file = File(node.path)
                 if (file.exists()) {
                     file.deleteRecursively()
                     loadFileTree()
@@ -338,11 +416,11 @@ class ProjectEditorViewModel(
         }
     }
 
-    fun renameFile(node: de.luca.dungeon_master_manager.data.FileNode, newName: String) {
+    fun renameFile(node: FileNode, newName: String) {
         viewModelScope.launch {
             try {
-                val oldFile = java.io.File(node.path)
-                val newFile = java.io.File(oldFile.parentFile, newName)
+                val oldFile = File(node.path)
+                val newFile = File(oldFile.parentFile, newName)
                 if (oldFile.renameTo(newFile)) {
                     loadFileTree()
                     closeTab(node.path)
@@ -353,20 +431,218 @@ class ProjectEditorViewModel(
         }
     }
 
-    fun moveFile(node: de.luca.dungeon_master_manager.data.FileNode, newParentFolderName: String) {
+    fun moveFile(node: FileNode, newParentFolderName: String) {
+        val targetDirPath = if (newParentFolderName.isBlank() || newParentFolderName == "/") {
+            project.path
+        } else {
+            "${project.path}${File.separator}$newParentFolderName"
+        }
+        moveInternalFile(node.path, targetDirPath)
+    }
+
+    fun moveInternalFile(sourceFilePath: String, targetDirPath: String) {
         viewModelScope.launch {
-            try {
-                val oldFile = java.io.File(node.path)
-                val newParent = java.io.File("${project.path}${java.io.File.separator}$newParentFolderName")
-                if (!newParent.exists()) newParent.mkdirs()
-                
-                val newFile = java.io.File(newParent, oldFile.name)
-                if (oldFile.renameTo(newFile)) {
-                    loadFileTree()
-                    closeTab(node.path)
+            val sourceFile = File(sourceFilePath)
+            if (!sourceFile.exists() || sourceFile.isDirectory) return@launch
+
+            val targetDir = File(targetDirPath)
+            val isSameDir = try {
+                sourceFile.canonicalFile.parentFile == targetDir.canonicalFile
+            } catch (_: Exception) {
+                false
+            }
+            if (isSameDir) return@launch // No-op
+
+            // Flush any unsaved changes if this was the active tab
+            if (_activeTabPath.value == sourceFilePath) {
+                saveJob?.cancel()
+                _activeFileContent.value?.let { content ->
+                    val ext = sourceFilePath.substringAfterLast('.', "").lowercase()
+                    if (FileExtensions.isEditableText(ext)) {
+                        try {
+                            fileService.writeFile(sourceFilePath, content)
+                        } catch (_: Exception) {}
+                    }
                 }
+            }
+
+            var destination = File(targetDir, sourceFile.name)
+            val targetFolderDisplayName = if (try { targetDir.canonicalFile == File(project.path).canonicalFile } catch(_: Exception) { false }) {
+                "Projekt-Root"
+            } else {
+                targetDir.name
+            }
+
+            if (destination.exists()) {
+                val deferred = CompletableDeferred<ConflictDecision?>()
+                _pendingConflict.value = FileConflictPrompt(
+                    fileName = sourceFile.name,
+                    targetFolderDisplayName = targetFolderDisplayName,
+                    remainingFilesCount = 0,
+                    onDecision = { decision ->
+                        _pendingConflict.value = null
+                        deferred.complete(decision)
+                    },
+                    onCancelBatch = {
+                        _pendingConflict.value = null
+                        deferred.complete(null)
+                    }
+                )
+                val result = deferred.await() ?: return@launch
+                when (result.action) {
+                    ConflictAction.SKIP -> return@launch
+                    ConflictAction.RENAME -> {
+                        destination = fileService.generateUniqueTargetFile(targetDir, sourceFile.name)
+                    }
+                    ConflictAction.OVERWRITE -> {
+                        // Will overwrite
+                    }
+                }
+            }
+
+            try {
+                fileService.moveFileOnDisk(sourceFile, destination, overwrite = true)
+                
+                val oldPath = sourceFile.absolutePath
+                val newPath = destination.absolutePath
+
+                // If overwriting an existing file that had an open tab (different from source), close that old tab
+                if (oldPath != newPath) {
+                    _openTabs.value = _openTabs.value.filterNot { it.filePath == newPath && it.filePath != oldPath }
+                }
+
+                // Update open tabs
+                _openTabs.value = _openTabs.value.map { tab ->
+                    if (tab.filePath == oldPath) {
+                        tab.copy(filePath = newPath, fileName = destination.name, extension = destination.extension.lowercase())
+                    } else tab
+                }
+
+                // Update active tab path
+                if (_activeTabPath.value == oldPath) {
+                    _activeTabPath.value = newPath
+                }
+
+                // Update popped out tabs
+                _poppedOutTabs.value = _poppedOutTabs.value.map { popped ->
+                    if (popped.tab.filePath == oldPath) {
+                        popped.copy(tab = popped.tab.copy(filePath = newPath, fileName = destination.name, extension = destination.extension.lowercase()))
+                    } else popped
+                }
+
+                loadFileTree()
+                expandTargetDir(targetDirPath)
             } catch (e: Exception) {
-                // Ignore
+                e.printStackTrace()
+                showDropNotice("Fehler beim Verschieben: ${e.message}")
+            }
+        }
+    }
+
+    fun importExternalFiles(rawFiles: List<File>, targetDirPath: String) {
+        viewModelScope.launch {
+            val targetDir = File(targetDirPath)
+            val validation = fileService.validateExternalDrop(rawFiles, targetDir)
+
+            if (validation.validFiles.isEmpty()) {
+                if (validation.skippedDirectories > 0 && rawFiles.all { it.isDirectory }) {
+                    showDropNotice("Ordner können nicht per Drag & Drop importiert werden.")
+                } else if (validation.skippedDotFiles > 0 && rawFiles.all { it.name.startsWith(".") }) {
+                    showDropNotice("Versteckte Systemdateien können nicht importiert werden.")
+                } else if (validation.skippedSameDirectory > 0) {
+                    // Same directory no-op
+                } else {
+                    showDropNotice("Keine gültigen Dateien zum Importieren gefunden.")
+                }
+                return@launch
+            }
+
+            val targetFolderDisplayName = if (try { targetDir.canonicalFile == File(project.path).canonicalFile } catch(_: Exception) { false }) {
+                "Projekt-Root"
+            } else {
+                targetDir.name
+            }
+
+            var applyToAllDecision: ConflictAction? = null
+            val successfullyImported = mutableListOf<File>()
+
+            for ((index, sourceFile) in validation.validFiles.withIndex()) {
+                var destination = File(targetDir, sourceFile.name)
+
+                if (destination.exists()) {
+                    val actionToTake = if (applyToAllDecision != null) {
+                        applyToAllDecision
+                    } else {
+                        val deferred = CompletableDeferred<ConflictDecision?>()
+                        val remainingCount = validation.validFiles.size - 1 - index
+                        _pendingConflict.value = FileConflictPrompt(
+                            fileName = sourceFile.name,
+                            targetFolderDisplayName = targetFolderDisplayName,
+                            remainingFilesCount = remainingCount,
+                            onDecision = { decision ->
+                                _pendingConflict.value = null
+                                deferred.complete(decision)
+                            },
+                            onCancelBatch = {
+                                _pendingConflict.value = null
+                                deferred.complete(null)
+                            }
+                        )
+                        val result = deferred.await()
+                        if (result == null) {
+                            // User cancelled remainder of batch
+                            break
+                        }
+                        if (result.applyToAll) {
+                            applyToAllDecision = result.action
+                        }
+                        result.action
+                    }
+
+                    when (actionToTake) {
+                        ConflictAction.SKIP -> {
+                            continue
+                        }
+                        ConflictAction.RENAME -> {
+                            destination = fileService.generateUniqueTargetFile(targetDir, sourceFile.name)
+                        }
+                        ConflictAction.OVERWRITE -> {
+                            // Will overwrite
+                        }
+                    }
+                }
+
+                try {
+                    fileService.copyFile(sourceFile, destination, overwrite = true)
+                    successfullyImported.add(destination)
+
+                    // If overwritten file was active tab, reload content
+                    if (_activeTabPath.value == destination.absolutePath) {
+                        saveJob?.cancel()
+                        loadFileContent(destination.absolutePath)
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+
+            if (successfullyImported.isNotEmpty()) {
+                loadFileTree()
+                expandTargetDir(targetDirPath)
+
+                if (validation.skippedDirectories > 0) {
+                    showDropNotice("${successfullyImported.size} Datei(en) importiert – ${validation.skippedDirectories} Ordner übersprungen.", isWarning = true)
+                } else if (validation.skippedDotFiles > 0) {
+                    showDropNotice("${successfullyImported.size} Datei(en) importiert – ${validation.skippedDotFiles} Systemdatei(en) übersprungen.", isWarning = true)
+                }
+
+                // If exactly 1 file was imported, open it
+                if (successfullyImported.size == 1) {
+                    val single = successfullyImported.first()
+                    openFile(FileNode(name = single.name, path = single.absolutePath, isDirectory = false))
+                }
+            } else if (validation.skippedDirectories > 0) {
+                showDropNotice("Ordner können nicht per Drag & Drop importiert werden.")
             }
         }
     }

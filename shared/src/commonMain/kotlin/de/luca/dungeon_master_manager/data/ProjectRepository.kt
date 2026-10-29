@@ -9,16 +9,38 @@ import java.io.File
 class ProjectRepository {
     private val json = Json { prettyPrint = true; ignoreUnknownKeys = true }
 
-    private val baseDir: File
-        get() {
-            val home = System.getProperty("user.home")
-            return File(home, ".dungeon-master-manager").also { it.mkdirs() }
+    companion object {
+        val baseDir: File
+            get() {
+                val home = System.getProperty("user.home")
+                return File(home, ".dungeon-master-manager").also { it.mkdirs() }
+            }
+
+        val globalDir: File
+            get() = File(baseDir, ".global")
+
+        val globalNotesDir: File
+            get() = File(globalDir, "Notes")
+
+        val defaultEntityFolders = listOf(
+            "NPCs", "PCs", "Places", "Items", "Monsters"
+        )
+
+        /** Ensure global directories exist. */
+        fun ensureGlobalDirs() {
+            globalDir.mkdirs()
+            File(globalDir, "marker-icons").mkdirs()
+            globalNotesDir.mkdirs()
+            defaultEntityFolders.forEach { File(globalNotesDir, it).mkdirs() }
         }
+    }
+
+    private val baseDir: File
+        get() = ProjectRepository.baseDir
 
     /** Ensure global directories exist. */
     private fun ensureGlobalDirs() {
-        File(baseDir, ".global").mkdirs()
-        File(baseDir, ".global/marker-icons").mkdirs()
+        ProjectRepository.ensureGlobalDirs()
     }
 
     /** Default subfolders created for every new project. */

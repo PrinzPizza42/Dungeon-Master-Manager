@@ -21,18 +21,22 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import de.luca.dungeon_master_manager.colorElement
+import de.luca.dungeon_master_manager.data.EntityPopoutRequest
 import de.luca.dungeon_master_manager.ui.theme.GrimoireCard
 import de.luca.dungeon_master_manager.ui.theme.GrimoireColors
 import de.luca.dungeon_master_manager.ui.theme.GrimoireDivider
 import de.luca.dungeonmastermanager.database.Entity
 import de.luca.dungeon_master_manager.viewmodel.EntityViewModel
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EntityManagerDialog(
     viewModel: EntityViewModel,
     onDismiss: () -> Unit,
-    isGlobalOnly: Boolean = false
+    isGlobalOnly: Boolean = false,
+    projectPath: String? = null,
+    onOpenEntityPopout: ((EntityPopoutRequest) -> Unit)? = null
 ) {
     val projectEntities by viewModel.projectEntities.collectAsState()
     val globalEntities by viewModel.globalEntities.collectAsState()
@@ -143,7 +147,17 @@ fun EntityManagerDialog(
                                         canCopy = !isGlobalOnly,
                                         onDelete = { viewModel.deleteEntity(isShowingGlobal, entity.id) },
                                         onCopy = { viewModel.copyEntity(entity, !isShowingGlobal) },
-                                        onEdit = { entityToEdit = it }
+                                        onEdit = { entityToEdit = it },
+                                        onOpen = if (onOpenEntityPopout != null) {
+                                            {
+                                                onOpenEntityPopout(
+                                                    EntityPopoutRequest(
+                                                        entityName = entity.name,
+                                                        projectPath = if (isShowingGlobal) "" else (projectPath ?: "")
+                                                    )
+                                                )
+                                            }
+                                        } else null
                                     )
                                 }
                             }
@@ -205,7 +219,8 @@ private fun EntityRow(
     canCopy: Boolean,
     onDelete: (Entity) -> Unit,
     onCopy: (Entity) -> Unit,
-    onEdit: (Entity) -> Unit
+    onEdit: (Entity) -> Unit,
+    onOpen: (() -> Unit)? = null
 ) {
     GrimoireCard(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -237,6 +252,11 @@ private fun EntityRow(
                         style = MaterialTheme.typography.bodySmall,
                         color = GrimoireColors.ParchmentMuted
                     )
+                }
+            }
+            if (onOpen != null) {
+                TextButton(onClick = onOpen) {
+                    Text("Open", color = GrimoireColors.GoldPrimary, fontWeight = FontWeight.Bold)
                 }
             }
             TextButton(onClick = { onEdit(entity) }) {
@@ -381,72 +401,117 @@ fun CreateEntityDialog(
     )
 
     if (showFileSelector) {
-        val availableFiles = remember(isGlobal, type) { viewModel.getAvailableMdFiles(isGlobal, type) }
-        
-        AlertDialog(
-            onDismissRequest = { showFileSelector = false },
-            title = { 
-                Text(
-                    "Select Notes File",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = GrimoireColors.GoldPrimary
-                ) 
-            },
-            containerColor = GrimoireColors.SurfaceCard,
-            shape = RoundedCornerShape(8.dp),
-            text = {
-                Column(modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp)) {
-                    Button(
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                        onClick = {
-                            val newPath = viewModel.createTemplateFile(isGlobal, name.ifBlank { "Unnamed" }, type)
-                            notesPath = newPath
-                            showFileSelector = false
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = GrimoireColors.GoldContainer,
-                            contentColor = GrimoireColors.GoldBright
-                        ),
-                        border = BorderStroke(1.dp, GrimoireColors.BorderGold)
-                    ) {
-                        Text("+ Create New Template File in ${type}s/")
-                    }
-                    
-                    GrimoireDivider(modifier = Modifier.padding(vertical = 8.dp))
-                    
-                    if (availableFiles.isEmpty()) {
-                        Text("No markdown files found.", color = GrimoireColors.ParchmentMuted)
-                    } else {
-                        val typePrefix = "${type}s${java.io.File.separator}"
-                        LazyColumn {
-                            items(availableFiles) { file ->
-                                val isRelevant = file.startsWith(typePrefix)
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            notesPath = file
-                                            showFileSelector = false
-                                        }
-                                        .padding(vertical = 8.dp, horizontal = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = file,
-                                        color = if (isRelevant) GrimoireColors.GoldPrimary else GrimoireColors.ParchmentLight,
-                                        fontWeight = if (isRelevant) FontWeight.Bold else FontWeight.Normal
-                                    )
-                                }
+        NotesFilePickerDialog(
+            isGlobal = isGlobal,
+            entityName = name,
+            entityType = type,
+            viewModel = viewModel,
+            onDismiss = { showFileSelector = false },
+            onFileSelected = { selectedPath ->
+                notesPath = selectedPath
+                showFileSelector = false
+            }
+        )
+    }
+}
+
+@Composable
+fun NotesFilePickerDialog(
+    isGlobal: Boolean,
+    entityName: String,
+    entityType: String,
+    viewModel: EntityViewModel,
+    onDismiss: () -> Unit,
+    onFileSelected: (String) -> Unit
+) {
+    val availableFiles = remember(isGlobal, entityType) { viewModel.getAvailableMdFiles(isGlobal, entityType) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { 
+            Text(
+                "Select Notes File",
+                style = MaterialTheme.typography.titleLarge,
+                color = GrimoireColors.GoldPrimary
+            ) 
+        },
+        containerColor = GrimoireColors.SurfaceCard,
+        shape = RoundedCornerShape(8.dp),
+        text = {
+            Column(modifier = Modifier.fillMaxWidth().heightIn(max = 350.dp)) {
+                Button(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                    onClick = {
+                        val newPath = viewModel.createTemplateFile(isGlobal, entityName.ifBlank { "Unnamed" }, entityType)
+                        onFileSelected(newPath)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = GrimoireColors.GoldContainer,
+                        contentColor = GrimoireColors.GoldBright
+                    ),
+                    border = BorderStroke(1.dp, GrimoireColors.BorderGold)
+                ) {
+                    Text("+ Create New Template File in ${entityType}s/")
+                }
+
+                OutlinedButton(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    onClick = {
+                        val file = pickExternalFile()
+                        if (file != null && file.exists()) {
+                            val importedPath = viewModel.importExternalMdFile(file, isGlobal, entityType)
+                            onFileSelected(importedPath)
+                        }
+                    },
+                    border = BorderStroke(1.dp, GrimoireColors.BorderBronze),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = GrimoireColors.GoldPrimary)
+                ) {
+                    Text("Import External .md File...")
+                }
+                
+                GrimoireDivider(modifier = Modifier.padding(vertical = 6.dp))
+                
+                if (availableFiles.isEmpty()) {
+                    Text("No markdown files found.", color = GrimoireColors.ParchmentMuted)
+                } else {
+                    val typePrefix = "${entityType}s${File.separator}"
+                    val typePrefixSlash = "${entityType}s/"
+                    LazyColumn {
+                        items(availableFiles) { file ->
+                            val isRelevant = file.startsWith(typePrefix, ignoreCase = true) || file.startsWith(typePrefixSlash, ignoreCase = true)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        onFileSelected(file)
+                                    }
+                                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = file,
+                                    color = if (isRelevant) GrimoireColors.GoldPrimary else GrimoireColors.ParchmentLight,
+                                    fontWeight = if (isRelevant) FontWeight.Bold else FontWeight.Normal
+                                )
                             }
                         }
                     }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = { showFileSelector = false }) { 
-                    Text("Close", color = GrimoireColors.ParchmentMuted) 
-                }
             }
-        )
-    }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { 
+                Text("Close", color = GrimoireColors.ParchmentMuted) 
+            }
+        }
+    )
+}
+
+private fun pickExternalFile(): File? {
+    val dialog = java.awt.FileDialog(null as java.awt.Frame?, "Select Markdown File", java.awt.FileDialog.LOAD)
+    dialog.setFilenameFilter { _, name -> name.lowercase().endsWith(".md") }
+    dialog.isVisible = true
+    val dir = dialog.directory
+    val file = dialog.file
+    return if (dir != null && file != null) File(dir, file) else null
 }

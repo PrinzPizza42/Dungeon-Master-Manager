@@ -1,12 +1,17 @@
 package de.luca.dungeon_master_manager.ui
 
 import androidx.compose.foundation.*
+import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draganddrop.DragAndDropEvent
+import androidx.compose.ui.draganddrop.DragAndDropTarget
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.font.FontWeight
@@ -15,14 +20,21 @@ import androidx.compose.ui.unit.sp
 import de.luca.dungeon_master_manager.data.EntityPopoutRequest
 import de.luca.dungeon_master_manager.data.FileExtensions
 import de.luca.dungeon_master_manager.ui.components.EditorUnifiedTopBar
+import de.luca.dungeon_master_manager.ui.components.ExplorerDropPayload
 import de.luca.dungeon_master_manager.ui.components.GrimoireTitleBar
 import de.luca.dungeon_master_manager.ui.components.GrimoireWindowFrame
+import de.luca.dungeon_master_manager.ui.components.extractExplorerPayload
+import de.luca.dungeon_master_manager.ui.components.isExplorerFileDrag
 import de.luca.dungeon_master_manager.ui.theme.GrimoireColors
 import de.luca.dungeon_master_manager.ui.theme.GrimoireDivider
 import de.luca.dungeon_master_manager.ui.theme.GrimoireTheme
+import de.luca.dungeon_master_manager.viewmodel.ConflictAction
+import de.luca.dungeon_master_manager.viewmodel.ConflictDecision
+import de.luca.dungeon_master_manager.viewmodel.ExplorerDropNotice
 import de.luca.dungeon_master_manager.viewmodel.ProjectEditorViewModel
 import java.awt.Cursor
 import java.awt.Window
+import java.io.File
 
 /**
  * Main project editor screen with sidebar file tree, tab bar, and content area.
@@ -44,6 +56,8 @@ fun ProjectEditorScreen(
     val activeTabPath by viewModel.activeTabPath.collectAsState()
     val fileContent by viewModel.activeFileContent.collectAsState()
     val isLoadingContent by viewModel.isLoadingContent.collectAsState()
+    val pendingConflict by viewModel.pendingConflict.collectAsState()
+    val dropNotice by viewModel.dropNotice.collectAsState()
 
     val activeTab = openTabs.find { it.filePath == activeTabPath }
 
@@ -57,6 +71,21 @@ fun ProjectEditorScreen(
     }
     LaunchedEffect(currentTitle) {
         onTitleChange(currentTitle)
+    }
+
+    if (window != null) {
+        DisposableEffect(window) {
+            val focusListener = object : java.awt.event.WindowFocusListener {
+                override fun windowGainedFocus(e: java.awt.event.WindowEvent?) {
+                    viewModel.loadFileTree()
+                }
+                override fun windowLostFocus(e: java.awt.event.WindowEvent?) {}
+            }
+            window.addWindowFocusListener(focusListener)
+            onDispose {
+                window.removeWindowFocusListener(focusListener)
+            }
+        }
     }
     
     val entityViewModel = remember(viewModel.project.path) { 
@@ -97,12 +126,18 @@ fun ProjectEditorScreen(
                 fileTree = fileTree,
                 expandedPaths = expandedPaths,
                 activeFilePath = activeTabPath,
+                projectPath = viewModel.project.path,
+                dropNotice = dropNotice,
+                onDismissDropNotice = { viewModel.dismissDropNotice() },
                 onNodeClick = { viewModel.openFile(it) },
                 onCreateFile = { folder, file -> viewModel.createNewFile(folder, file) },
                 onRenameFile = { node, newName -> viewModel.renameFile(node, newName) },
                 onMoveFile = { node, folder -> viewModel.moveFile(node, folder) },
                 onDeleteFile = { node -> viewModel.deleteFile(node) },
                 onPopOutClick = { node -> viewModel.openAsWindow(node) },
+                onExternalFilesDropped = { files, targetDir -> viewModel.importExternalFiles(files, targetDir) },
+                onInternalFileMoved = { sourcePath, targetDir -> viewModel.moveInternalFile(sourcePath, targetDir) },
+                onDragTransferCompleted = { filePath -> viewModel.onDragTransferCompleted(filePath) },
                 onOpenNativeExplorer = {
                     try {
                         val file = java.io.File(viewModel.project.path)
@@ -164,7 +199,116 @@ fun ProjectEditorScreen(
         EntityManagerDialog(
             isGlobalOnly = false,
             viewModel = entityViewModel,
-            onDismiss = { showEntityDialog = false }
+            onDismiss = { showEntityDialog = false },
+            projectPath = viewModel.project.path,
+            onOpenEntityPopout = onOpenEntityPopout
+        )
+    }
+
+    if (pendingConflict != null) {
+        val prompt = pendingConflict!!
+        var applyToAll by remember(prompt.fileName) { mutableStateOf(false) }
+
+        AlertDialog(
+            onDismissRequest = { prompt.onCancelBatch() },
+            title = {
+                Text("Namenskonflikt", style = MaterialTheme.typography.titleLarge, color = GrimoireColors.GoldPrimary)
+            },
+            containerColor = GrimoireColors.SurfaceCard,
+            shape = RoundedCornerShape(8.dp),
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "In '${prompt.targetFolderDisplayName}' existiert bereits eine Datei namens '${prompt.fileName}'.",
+                        color = GrimoireColors.ParchmentLight,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        text = "Wie möchtest du mit diesem Konflikt verfahren?",
+                        color = GrimoireColors.ParchmentMuted,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+
+                    if (prompt.remainingFilesCount > 0) {
+                        Spacer(Modifier.height(4.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().clickable { applyToAll = !applyToAll }
+                        ) {
+                            Checkbox(
+                                checked = applyToAll,
+                                onCheckedChange = { applyToAll = it },
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = GrimoireColors.GoldPrimary,
+                                    uncheckedColor = GrimoireColors.BorderBronze,
+                                    checkmarkColor = GrimoireColors.Background
+                                )
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = "Für alle weiteren ${prompt.remainingFilesCount} Dateien anwenden",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = GrimoireColors.ParchmentLight
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            prompt.onDecision(
+                                ConflictDecision(
+                                    action = ConflictAction.RENAME,
+                                    applyToAll = applyToAll
+                                )
+                            )
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = GrimoireColors.GoldPrimary,
+                            contentColor = GrimoireColors.Background
+                        )
+                    ) {
+                        Text("Umbenennen")
+                    }
+                    Button(
+                        onClick = {
+                            prompt.onDecision(
+                                ConflictDecision(
+                                    action = ConflictAction.OVERWRITE,
+                                    applyToAll = applyToAll
+                                )
+                            )
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = GrimoireColors.CrimsonError,
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text("Überschreiben")
+                    }
+                }
+            },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(
+                        onClick = {
+                            prompt.onDecision(
+                                ConflictDecision(
+                                    action = ConflictAction.SKIP,
+                                    applyToAll = applyToAll
+                                )
+                            )
+                        }
+                    ) {
+                        Text("Überspringen", color = GrimoireColors.ParchmentMuted)
+                    }
+                    TextButton(onClick = { prompt.onCancelBatch() }) {
+                        Text("Abbrechen", color = GrimoireColors.ParchmentDim)
+                    }
+                }
+            }
         )
     }
 
@@ -227,11 +371,11 @@ fun StandaloneFileEditorWindow(
 ) {
     var fileContent by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(true) }
-    val isImage = FileExtensions.isImage(tab.extension)
+    val isEditable = FileExtensions.isEditableText(tab.extension)
     
     LaunchedEffect(tab.filePath) {
         isLoading = true
-        if (!isImage) {
+        if (isEditable) {
             fileContent = de.luca.dungeon_master_manager.data.FileService().readFile(tab.filePath)
         } else {
             fileContent = ""
@@ -243,7 +387,7 @@ fun StandaloneFileEditorWindow(
     LaunchedEffect(contentToSave) {
         contentToSave?.let { content ->
             kotlinx.coroutines.delay(500)
-            if (!isImage) {
+            if (isEditable) {
                 de.luca.dungeon_master_manager.data.FileService().writeFile(tab.filePath, content)
             }
         }
@@ -265,19 +409,24 @@ fun StandaloneFileEditorWindow(
     }
 }
 
-
-@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
 private fun EditorSidebar(
     fileTree: de.luca.dungeon_master_manager.data.FileNode?,
     expandedPaths: Set<String>,
     activeFilePath: String?,
+    projectPath: String,
+    dropNotice: ExplorerDropNotice?,
+    onDismissDropNotice: () -> Unit,
     onNodeClick: (de.luca.dungeon_master_manager.data.FileNode) -> Unit,
     onCreateFile: (folderName: String, fileName: String) -> Unit,
     onRenameFile: (de.luca.dungeon_master_manager.data.FileNode, String) -> Unit,
     onMoveFile: (de.luca.dungeon_master_manager.data.FileNode, String) -> Unit,
     onDeleteFile: (de.luca.dungeon_master_manager.data.FileNode) -> Unit,
     onPopOutClick: (de.luca.dungeon_master_manager.data.FileNode) -> Unit,
+    onExternalFilesDropped: (List<File>, String) -> Unit,
+    onInternalFileMoved: (String, String) -> Unit,
+    onDragTransferCompleted: (String) -> Unit = {},
     onOpenNativeExplorer: () -> Unit,
     onManageEntities: () -> Unit,
     modifier: Modifier = Modifier,
@@ -286,6 +435,42 @@ private fun EditorSidebar(
     var fileToRename by remember { mutableStateOf<de.luca.dungeon_master_manager.data.FileNode?>(null) }
     var fileToMove by remember { mutableStateOf<de.luca.dungeon_master_manager.data.FileNode?>(null) }
     var fileToDelete by remember { mutableStateOf<de.luca.dungeon_master_manager.data.FileNode?>(null) }
+
+    var hoveredDropFolderPath by remember { mutableStateOf<String?>(null) }
+    val isRootHovered = hoveredDropFolderPath == projectPath
+
+    val rootDropTarget = remember(projectPath) {
+        object : DragAndDropTarget {
+            override fun onDrop(event: DragAndDropEvent): Boolean {
+                hoveredDropFolderPath = null
+                val payload = event.extractExplorerPayload() ?: return false
+                when (payload) {
+                    is ExplorerDropPayload.ExternalFiles -> {
+                        onExternalFilesDropped(payload.files, projectPath)
+                        return true
+                    }
+                    is ExplorerDropPayload.InternalFile -> {
+                        onInternalFileMoved(payload.data.filePath, projectPath)
+                        return true
+                    }
+                }
+            }
+
+            override fun onEntered(event: DragAndDropEvent) {
+                hoveredDropFolderPath = projectPath
+            }
+
+            override fun onExited(event: DragAndDropEvent) {
+                if (hoveredDropFolderPath == projectPath) {
+                    hoveredDropFolderPath = null
+                }
+            }
+
+            override fun onEnded(event: DragAndDropEvent) {
+                hoveredDropFolderPath = null
+            }
+        }
+    }
 
     Surface(
         modifier = modifier,
@@ -324,26 +509,113 @@ private fun EditorSidebar(
                 }
             }
 
+            // Drop Notice Banner (if any)
+            dropNotice?.let { notice ->
+                val containerColor = if (notice.isWarning) GrimoireColors.ErrorContainer.copy(alpha = 0.85f) else GrimoireColors.GoldContainer
+                val textColor = if (notice.isWarning) GrimoireColors.OnErrorContainer else GrimoireColors.GoldBright
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(containerColor)
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = notice.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = textColor,
+                        fontSize = 12.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(
+                        onClick = onDismissDropNotice,
+                        contentPadding = PaddingValues(0.dp),
+                        modifier = Modifier.defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
+                    ) {
+                        Text("✕", fontSize = 12.sp, color = textColor)
+                    }
+                }
+            }
+
             HorizontalDivider(color = GrimoireColors.BorderBronze)
 
             if (fileTree != null) {
                 val scrollState = rememberScrollState()
+                val rootBorderModifier = if (isRootHovered) {
+                    Modifier
+                        .border(1.dp, GrimoireColors.GoldPrimary, RoundedCornerShape(4.dp))
+                        .background(GrimoireColors.GoldContainer.copy(alpha = 0.25f))
+                } else {
+                    Modifier
+                }
+
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .verticalScroll(scrollState)
+                        .then(rootBorderModifier)
+                        .dragAndDropTarget(
+                            shouldStartDragAndDrop = { event -> event.isExplorerFileDrag() },
+                            target = rootDropTarget
+                        )
                 ) {
-                    FileTreeView(
-                        rootNode = fileTree,
-                        expandedPaths = expandedPaths,
-                        activeFilePath = activeFilePath,
-                        onNodeClick = onNodeClick,
-                        onRenameClick = { fileToRename = it },
-                        onMoveClick = { fileToMove = it },
-                        onDeleteClick = { fileToDelete = it },
-                        onPopOutClick = onPopOutClick,
-                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(scrollState)
+                    ) {
+                        FileTreeView(
+                            rootNode = fileTree,
+                            expandedPaths = expandedPaths,
+                            activeFilePath = activeFilePath,
+                            hoveredDropFolderPath = hoveredDropFolderPath,
+                            onDropTargetHoverChange = { folder, isEntered ->
+                                if (isEntered) {
+                                    hoveredDropFolderPath = folder
+                                } else if (hoveredDropFolderPath == folder) {
+                                    hoveredDropFolderPath = null
+                                }
+                            },
+                            onPayloadDropped = { payload, targetFolderPath ->
+                                when (payload) {
+                                    is ExplorerDropPayload.ExternalFiles -> {
+                                        onExternalFilesDropped(payload.files, targetFolderPath)
+                                        true
+                                    }
+                                    is ExplorerDropPayload.InternalFile -> {
+                                        onInternalFileMoved(payload.data.filePath, targetFolderPath)
+                                        true
+                                    }
+                                }
+                            },
+                            onDragTransferCompleted = onDragTransferCompleted,
+                            onNodeClick = onNodeClick,
+                            onRenameClick = { fileToRename = it },
+                            onMoveClick = { fileToMove = it },
+                            onDeleteClick = { fileToDelete = it },
+                            onPopOutClick = onPopOutClick,
+                        )
+                    }
+
+                    if (isRootHovered) {
+                        Surface(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 8.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            color = GrimoireColors.GoldContainer,
+                            border = BorderStroke(1.dp, GrimoireColors.BorderGold)
+                        ) {
+                            Text(
+                                text = "📥 Im Projekt-Root ablegen",
+                                color = GrimoireColors.GoldBright,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
                 }
             } else {
                 Box(
@@ -540,7 +812,7 @@ private fun EditorSidebar(
                                     .fillMaxWidth()
                                     .clickable { selectedFolder = folder }
                                     .padding(vertical = 4.dp)
-                            ) {
+                                ) {
                                 RadioButton(
                                     selected = (selectedFolder == folder),
                                     onClick = { selectedFolder = folder },

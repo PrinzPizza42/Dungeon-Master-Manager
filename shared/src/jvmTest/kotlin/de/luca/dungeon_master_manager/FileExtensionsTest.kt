@@ -22,12 +22,12 @@ class FileExtensionsTest {
 
     @Test
     fun testTextExtensions() {
-        val validTexts = listOf("txt", "text", "log", "TXT", "LOG")
+        val validTexts = listOf("txt", "text", "log", "json", "csv", "yaml", "yml", "xml", "TXT", "JSON")
         for (ext in validTexts) {
             assertTrue(FileExtensions.isText(ext), "Expected $ext to be recognized as text")
         }
 
-        val nonTexts = listOf("png", "jpg", "map", "exe")
+        val nonTexts = listOf("png", "jpg", "map", "exe", "pdf")
         for (ext in nonTexts) {
             assertFalse(FileExtensions.isText(ext), "Expected $ext NOT to be recognized as text")
         }
@@ -42,5 +42,27 @@ class FileExtensionsTest {
         assertTrue(FileExtensions.isMap("map"))
         assertTrue(FileExtensions.isMap("MAP"))
         assertFalse(FileExtensions.isMap("png"))
+    }
+
+    @Test
+    fun testEditableAndSupported() {
+        assertTrue(FileExtensions.isEditableText("md"))
+        assertTrue(FileExtensions.isEditableText("txt"))
+        assertTrue(FileExtensions.isEditableText("map"))
+        assertTrue(FileExtensions.isEditableText("json"))
+        assertFalse(FileExtensions.isEditableText("png"))
+        assertFalse(FileExtensions.isEditableText("pdf"))
+        assertFalse(FileExtensions.isEditableText("mp3"))
+
+        assertTrue(FileExtensions.isSupportedInApp("md"))
+        assertTrue(FileExtensions.isSupportedInApp("png"))
+        assertTrue(FileExtensions.isSupportedInApp("map"))
+        assertFalse(FileExtensions.isSupportedInApp("pdf"))
+        assertFalse(FileExtensions.isSupportedInApp("mp3"))
+        assertFalse(FileExtensions.isSupportedInApp("zip"))
+
+        assertTrue(FileExtensions.isPdf("pdf"))
+        assertTrue(FileExtensions.isAudio("mp3"))
+        assertTrue(FileExtensions.isArchive("zip"))
     }
 }

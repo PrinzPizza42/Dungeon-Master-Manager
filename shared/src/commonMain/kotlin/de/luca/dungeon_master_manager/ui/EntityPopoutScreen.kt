@@ -1,5 +1,6 @@
 package de.luca.dungeon_master_manager.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -11,6 +12,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import de.luca.dungeon_master_manager.data.EntityPopoutRequest
+import de.luca.dungeon_master_manager.data.ProjectRepository
 import de.luca.dungeon_master_manager.ui.components.GrimoireTitleBar
 import de.luca.dungeon_master_manager.ui.theme.GrimoireColors
 import de.luca.dungeon_master_manager.ui.theme.GrimoireDivider
@@ -34,11 +36,12 @@ fun EntityPopoutScreen(
         val coroutineScope = rememberCoroutineScope()
         val viewModel = remember(request.projectPath) {
             de.luca.dungeon_master_manager.viewmodel.EntityViewModel(
-                request.projectPath,
+                request.projectPath.ifBlank { null },
                 null
             )
         }
         var showEditDialog by remember { mutableStateOf(false) }
+        var showLinkFileDialog by remember { mutableStateOf(false) }
 
         val projectEnts by viewModel.projectEntities.collectAsState()
         val globalEnts by viewModel.globalEntities.collectAsState()
@@ -48,15 +51,18 @@ fun EntityPopoutScreen(
         var initialized by remember { mutableStateOf(false) }
 
         val entity = remember(projectEnts, globalEnts, targetEntityId, initialized, request.entityName) {
-            val pMatch = projectEnts.find { 
-                if (targetEntityId != null) it.id.toString() == targetEntityId else it.name == request.entityName 
-            }
+            val pMatch = if (request.projectPath.isNotBlank()) {
+                projectEnts.find { 
+                    if (targetEntityId != null) it.id == targetEntityId else it.name == request.entityName 
+                }
+            } else null
+
             if (pMatch != null) {
                 isGlobalEntity = false
                 pMatch
             } else {
                 val gMatch = globalEnts.find { 
-                    if (targetEntityId != null) it.id.toString() == targetEntityId else it.name == request.entityName 
+                    if (targetEntityId != null) it.id == targetEntityId else it.name == request.entityName 
                 }
                 if (gMatch != null) {
                     isGlobalEntity = true
@@ -65,14 +71,23 @@ fun EntityPopoutScreen(
             }
         }
 
+        fun getNotesBaseDir(isGlobal: Boolean): File {
+            return if (isGlobal) {
+                ProjectRepository.globalNotesDir
+            } else {
+                File(request.projectPath)
+            }
+        }
+
         var fileContent by remember { mutableStateOf<String?>(null) }
         var isLoading by remember { mutableStateOf(true) }
 
-        LaunchedEffect(entity?.notesFilePath) {
+        LaunchedEffect(entity?.notesFilePath, isGlobalEntity) {
             isLoading = true
             if (entity?.notesFilePath != null) {
                 withContext(Dispatchers.IO) {
-                    val file = File(request.projectPath, entity.notesFilePath)
+                    val baseDir = getNotesBaseDir(isGlobalEntity)
+                    val file = File(baseDir, entity.notesFilePath)
                     if (file.exists() && file.isFile) {
                         fileContent = file.readText()
                     } else {
@@ -104,7 +119,7 @@ fun EntityPopoutScreen(
                 } else if (entity == null) {
                     Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                         Text(
-                            "Entity '${request.entityName}' not found in project database.",
+                            "Entity '${request.entityName}' not found.",
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -174,7 +189,8 @@ fun EntityPopoutScreen(
                                         withContext(Dispatchers.IO) {
                                             val notesPath = entity.notesFilePath
                                             if (notesPath != null) {
-                                                val file = File(request.projectPath, notesPath)
+                                                val baseDir = getNotesBaseDir(isGlobalEntity)
+                                                val file = File(baseDir, notesPath)
                                                 file.writeText(newContent)
                                             }
                                         }
@@ -188,10 +204,57 @@ fun EntityPopoutScreen(
                         }
                     } else {
                         Box(modifier = Modifier.weight(1f).fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text(
-                                "No notes file linked to this entity, or file does not exist.",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(16.dp),
+                                modifier = Modifier.padding(24.dp)
+                            ) {
+                                Text(
+                                    "No notes file linked to this entity, or file does not exist.",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Button(
+                                        onClick = {
+                                            coroutineScope.launch {
+                                                val newPath = viewModel.createTemplateFile(
+                                                    isGlobal = isGlobalEntity,
+                                                    entityName = entity.name,
+                                                    entityType = entity.type
+                                                )
+                                                viewModel.updateEntity(
+                                                    isGlobal = isGlobalEntity,
+                                                    id = entity.id,
+                                                    name = entity.name,
+                                                    type = entity.type,
+                                                    color = entity.color,
+                                                    notesFilePath = newPath
+                                                )
+                                                val baseDir = getNotesBaseDir(isGlobalEntity)
+                                                val file = File(baseDir, newPath)
+                                                if (file.exists() && file.isFile) {
+                                                    fileContent = file.readText()
+                                                }
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = GrimoireColors.GoldPrimary,
+                                            contentColor = GrimoireColors.Background
+                                        )
+                                    ) {
+                                        Text("+ Create Notes File")
+                                    }
+
+                                    OutlinedButton(
+                                        onClick = { showLinkFileDialog = true },
+                                        border = BorderStroke(1.dp, GrimoireColors.BorderBronze),
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = GrimoireColors.GoldPrimary)
+                                    ) {
+                                        Text("Link Existing File")
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -205,8 +268,31 @@ fun EntityPopoutScreen(
                 initialEntity = entity,
                 onDismiss = { showEditDialog = false },
                 onCreate = { name, type, color, notesPath ->
+                    targetEntityId = entity.id
                     viewModel.updateEntity(isGlobalEntity, entity.id, name, type, color, notesPath)
                     showEditDialog = false
+                }
+            )
+        }
+
+        if (showLinkFileDialog && entity != null) {
+            NotesFilePickerDialog(
+                isGlobal = isGlobalEntity,
+                entityName = entity.name,
+                entityType = entity.type,
+                viewModel = viewModel,
+                onDismiss = { showLinkFileDialog = false },
+                onFileSelected = { selectedPath ->
+                    targetEntityId = entity.id
+                    viewModel.updateEntity(
+                        isGlobal = isGlobalEntity,
+                        id = entity.id,
+                        name = entity.name,
+                        type = entity.type,
+                        color = entity.color,
+                        notesFilePath = selectedPath
+                    )
+                    showLinkFileDialog = false
                 }
             )
         }

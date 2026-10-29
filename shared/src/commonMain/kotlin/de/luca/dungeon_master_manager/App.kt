@@ -54,7 +54,8 @@ fun App(
                         }
                         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                             ProjectLauncherScreen(
-                                onProjectSelected = { currentScreen = Screen.Editor(it) }
+                                onProjectSelected = { currentScreen = Screen.Editor(it) },
+                                onOpenEntityPopout = onOpenEntityPopout
                             )
                         }
                     }

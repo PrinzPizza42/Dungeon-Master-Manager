@@ -2,8 +2,8 @@ package de.luca.dungeon_master_manager.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.lifecycle.viewmodel.compose.viewModel
 import de.luca.dungeon_master_manager.data.DatabaseHelper
+import de.luca.dungeon_master_manager.data.ProjectRepository
 import de.luca.dungeonmastermanager.database.Entity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,7 +33,7 @@ class EntityViewModel(private val projectPath: String?, private val viewModel: P
 
     init {
         val globalDb = DatabaseHelper.globalDatabase
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             var globalLoaded = false
             var projectLoaded = projectPath == null
 
@@ -59,38 +59,32 @@ class EntityViewModel(private val projectPath: String?, private val viewModel: P
     }
 
     fun addEntity(isGlobal: Boolean, name: String, type: String, color: String?, notesFilePath: String?) {
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                try {
-                    val db = if (isGlobal) DatabaseHelper.globalDatabase else DatabaseHelper.getProjectDatabase(projectPath!!)
-                    db.entityQueries.insertEntity(UUID.randomUUID().toString(), name, type, color, notesFilePath)
-                    println("Entity inserted successfully: $name")
-                } catch (e: Exception) {
-                    System.err.println("Failed to insert entity: ${e.message}")
-                    e.printStackTrace()
-                }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val db = if (isGlobal) DatabaseHelper.globalDatabase else DatabaseHelper.getProjectDatabase(projectPath!!)
+                db.entityQueries.insertEntity(UUID.randomUUID().toString(), name, type, color, notesFilePath)
+                println("Entity inserted successfully: $name")
+            } catch (e: Exception) {
+                System.err.println("Failed to insert entity: ${e.message}")
+                e.printStackTrace()
             }
             viewModel?.loadEntityColors()
         }
     }
 
     fun updateEntity(isGlobal: Boolean, id: String, name: String, type: String, color: String?, notesFilePath: String?) {
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                val db = if (isGlobal) DatabaseHelper.globalDatabase else DatabaseHelper.getProjectDatabase(projectPath!!)
-                db.entityQueries.updateEntity(name, type, color, notesFilePath, id)
-            }
+        viewModelScope.launch(Dispatchers.IO) {
+            val db = if (isGlobal) DatabaseHelper.globalDatabase else DatabaseHelper.getProjectDatabase(projectPath!!)
+            db.entityQueries.updateEntity(name, type, color, notesFilePath, id)
             viewModel?.loadEntityColors()
         }
     }
 
     fun deleteEntity(isGlobal: Boolean, id: String) {
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                val db = if (isGlobal) DatabaseHelper.globalDatabase else DatabaseHelper.getProjectDatabase(projectPath!!)
-                db.entityQueries.deleteEntity(id)
-                deleteMarkersForEntity(isGlobal, id)
-            }
+        viewModelScope.launch(Dispatchers.IO) {
+            val db = if (isGlobal) DatabaseHelper.globalDatabase else DatabaseHelper.getProjectDatabase(projectPath!!)
+            db.entityQueries.deleteEntity(id)
+            deleteMarkersForEntity(isGlobal, id)
             viewModel?.onEntityDeleted(id)
         }
     }
@@ -104,8 +98,7 @@ class EntityViewModel(private val projectPath: String?, private val viewModel: P
         }
 
         if (isGlobal) {
-            val home = System.getProperty("user.home")
-            val baseDir = File(home, ".dungeon-master-manager")
+            val baseDir = ProjectRepository.baseDir
             if (baseDir.exists() && baseDir.isDirectory) {
                 baseDir.listFiles()?.filter { it.isDirectory && !it.name.startsWith(".") }?.forEach {
                     projectDirs.add(it)
@@ -134,68 +127,132 @@ class EntityViewModel(private val projectPath: String?, private val viewModel: P
         }
     }
 
+    private fun resolveNonConflictingFile(parentDir: File, baseName: String, extension: String): File {
+        var candidate = File(parentDir, "$baseName.$extension")
+        var counter = 1
+        while (candidate.exists()) {
+            candidate = File(parentDir, "${baseName}_$counter.$extension")
+            counter++
+        }
+        return candidate
+    }
+
     fun copyEntity(entity: Entity, toGlobal: Boolean) {
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                val destDb = if (toGlobal) DatabaseHelper.globalDatabase else DatabaseHelper.getProjectDatabase(projectPath!!)
-                destDb.entityQueries.insertEntity(UUID.randomUUID().toString(), entity.name, entity.type, entity.color, entity.notesFilePath)
+        viewModelScope.launch(Dispatchers.IO) {
+            var targetNotesPath = entity.notesFilePath
+            if (!entity.notesFilePath.isNullOrBlank()) {
+                val sourceRootDir = if (toGlobal) {
+                    if (projectPath != null) File(projectPath) else null
+                } else {
+                    ProjectRepository.globalNotesDir
+                }
+
+                val targetRootDir = if (toGlobal) {
+                    ProjectRepository.globalNotesDir
+                } else {
+                    if (projectPath != null) File(projectPath) else null
+                }
+
+                if (sourceRootDir != null && targetRootDir != null) {
+                    val sourceFile = File(sourceRootDir, entity.notesFilePath)
+                    if (sourceFile.exists() && sourceFile.isFile) {
+                        val relativeParent = File(entity.notesFilePath).parentFile?.path ?: "${entity.type}s"
+                        val targetDir = File(targetRootDir, relativeParent).also { it.mkdirs() }
+                        val baseName = sourceFile.nameWithoutExtension
+                        val targetFile = resolveNonConflictingFile(targetDir, baseName, sourceFile.extension.ifBlank { "md" })
+                        sourceFile.copyTo(targetFile, overwrite = false)
+                        targetNotesPath = if (relativeParent.isBlank() || relativeParent == ".") {
+                            targetFile.name
+                        } else {
+                            "$relativeParent${File.separator}${targetFile.name}"
+                        }
+                    }
+                }
+            }
+
+            val destDb = if (toGlobal) DatabaseHelper.globalDatabase else DatabaseHelper.getProjectDatabase(projectPath!!)
+            destDb.entityQueries.insertEntity(UUID.randomUUID().toString(), entity.name, entity.type, entity.color, targetNotesPath)
+
+            if (!toGlobal) {
+                viewModel?.loadFileTree()
             }
             viewModel?.loadEntityColors()
         }
     }
 
-    fun getAvailableMdFiles(isGlobal: Boolean, entityType: String): List<String> {
+    fun importExternalMdFile(sourceFile: File, isGlobal: Boolean, entityType: String): String {
         val rootPath = if (isGlobal) {
-            java.io.File(System.getProperty("user.home"), ".dungeon-master-manager/.global/Notes").absolutePath
+            ProjectRepository.globalNotesDir
         } else {
-            projectPath ?: return emptyList()
+            if (projectPath != null) File(projectPath) else return ""
         }
 
-        val rootFile = java.io.File(rootPath)
-        if (!rootFile.exists()) return emptyList()
+        val pluralType = "${entityType}s"
+        val typeFolder = File(rootPath, pluralType).also { it.mkdirs() }
 
-        val allMdFiles = rootFile.walkTopDown()
-            .filter { it.isFile && it.extension == "md" }
-            .map { it.absolutePath.removePrefix(rootPath).removePrefix(java.io.File.separator) }
+        val baseName = sourceFile.nameWithoutExtension.ifBlank { "imported_note" }
+        val ext = sourceFile.extension.ifBlank { "md" }
+        val targetFile = resolveNonConflictingFile(typeFolder, baseName, ext)
+
+        sourceFile.copyTo(targetFile, overwrite = false)
+
+        if (!isGlobal) {
+            viewModel?.loadFileTree()
+        }
+
+        return "$pluralType${File.separator}${targetFile.name}"
+    }
+
+    fun getAvailableMdFiles(isGlobal: Boolean, entityType: String): List<String> {
+        val rootPath = if (isGlobal) {
+            ProjectRepository.globalNotesDir
+        } else {
+            if (projectPath != null) File(projectPath) else return emptyList()
+        }
+
+        if (!rootPath.exists()) return emptyList()
+
+        val rootAbsPath = rootPath.absolutePath
+        val allMdFiles = rootPath.walkTopDown()
+            .filter { it.isFile && it.extension.equals("md", ignoreCase = true) }
+            .map { it.absolutePath.removePrefix(rootAbsPath).removePrefix(File.separator) }
             .toList()
 
         // Sort by relevance (files in the folder matching the entity type go first)
         val pluralType = "${entityType}s"
-        val typeFolder = "$pluralType${java.io.File.separator}"
-        return allMdFiles.sortedByDescending { it.startsWith(typeFolder) }
+        val typeFolder = "$pluralType${File.separator}"
+        val typeFolderSlash = "$pluralType/"
+        return allMdFiles.sortedByDescending { it.startsWith(typeFolder, ignoreCase = true) || it.startsWith(typeFolderSlash, ignoreCase = true) }
     }
 
     fun createTemplateFile(isGlobal: Boolean, entityName: String, entityType: String): String {
         val rootPath = if (isGlobal) {
-            java.io.File(System.getProperty("user.home"), ".dungeon-master-manager/.global/Notes").absolutePath
+            ProjectRepository.globalNotesDir
         } else {
-            projectPath ?: return ""
+            if (projectPath != null) File(projectPath) else return ""
         }
 
         val pluralType = "${entityType}s"
-        val typeFolder = java.io.File(rootPath, pluralType)
-        if (!typeFolder.exists()) {
-            typeFolder.mkdirs()
-        }
+        val typeFolder = File(rootPath, pluralType).also { it.mkdirs() }
 
         // Sanitize name for file
-        val safeName = entityName.replace(Regex("[^a-zA-Z0-9.-]"), "_")
-        val file = java.io.File(typeFolder, "$safeName.md")
+        val safeName = entityName.replace(Regex("[^a-zA-Z0-9.-]"), "_").ifBlank { "unnamed" }
+        val file = resolveNonConflictingFile(typeFolder, safeName, "md")
 
-        if (!file.exists()) {
-            val template = """
-                # $entityName
-                
-                ## Description
-                
-                ## Details
-                
-            """.trimIndent()
-            file.writeText(template)
+        val template = """
+            # $entityName
+            
+            ## Description
+            
+            ## Details
+            
+        """.trimIndent()
+        file.writeText(template)
+
+        if (!isGlobal) {
+            viewModel?.loadFileTree()
         }
 
-        viewModel?.loadFileTree()
-
-        return "$pluralType${java.io.File.separator}${file.name}"
+        return "$pluralType${File.separator}${file.name}"
     }
 }

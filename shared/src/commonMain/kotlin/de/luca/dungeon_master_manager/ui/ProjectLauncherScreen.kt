@@ -35,6 +35,7 @@ import java.util.*
 @Composable
 fun ProjectLauncherScreen(
     onProjectSelected: (ProjectInfo) -> Unit,
+    onOpenEntityPopout: (de.luca.dungeon_master_manager.data.EntityPopoutRequest) -> Unit = {},
     viewModel: ProjectLauncherViewModel = viewModel { ProjectLauncherViewModel() },
 ) {
     val projects by viewModel.projects.collectAsState()
@@ -281,7 +282,9 @@ fun ProjectLauncherScreen(
         de.luca.dungeon_master_manager.ui.EntityManagerDialog(
             viewModel = entityViewModel,
             onDismiss = { showGlobalEntityDialog = false },
-            isGlobalOnly = true
+            isGlobalOnly = true,
+            projectPath = null,
+            onOpenEntityPopout = onOpenEntityPopout
         )
     }
 }
