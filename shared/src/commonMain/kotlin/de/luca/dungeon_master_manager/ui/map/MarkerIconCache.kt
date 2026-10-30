@@ -3,8 +3,12 @@ package de.luca.dungeon_master_manager.ui.map
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.res.loadImageBitmap
+import de.luca.dungeon_master_manager.data.ProjectRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.jetbrains.skia.Data
+import org.jetbrains.skia.Surface
+import org.jetbrains.skia.svg.SVGDOM
 import java.awt.RenderingHints
 import java.awt.image.BufferedImage
 import java.io.File
@@ -12,22 +16,68 @@ import java.util.concurrent.ConcurrentHashMap
 import javax.imageio.ImageIO
 
 object MarkerIconCache {
+    val SUPPORTED_EXTENSIONS = setOf("png", "jpg", "jpeg", "webp", "svg")
+
     private val iconCache = ConcurrentHashMap<String, ImageBitmap>()
     private val thumbnailCache = ConcurrentHashMap<String, ImageBitmap>()
 
-    private val iconsDir: File by lazy {
-        File(System.getProperty("user.home"), ".dungeon-master-manager/.global/Icons").also { it.mkdirs() }
+    val iconsDir: File
+        get() = ProjectRepository.globalIconsDir
+
+    fun isSvg(file: File): Boolean = file.extension.lowercase() == "svg"
+
+    fun rasterizeSvg(file: File, targetDimension: Int = 128): ImageBitmap? {
+        return try {
+            val bytes = file.readBytes()
+            val data = Data.makeFromBytes(bytes)
+            val dom = SVGDOM(data)
+            val root = dom.root
+            val vb = root?.viewBox
+            val naturalW = if (vb != null && vb.width > 0f) vb.width
+                else (root?.width?.value?.takeIf { it > 0f } ?: 100f)
+            val naturalH = if (vb != null && vb.height > 0f) vb.height
+                else (root?.height?.value?.takeIf { it > 0f } ?: 100f)
+
+            val surface = Surface.makeRasterN32Premul(targetDimension, targetDimension)
+            val canvas = surface.canvas
+
+            val scale = minOf(targetDimension.toFloat() / naturalW, targetDimension.toFloat() / naturalH)
+            val scaledW = naturalW * scale
+            val scaledH = naturalH * scale
+            val dx = (targetDimension - scaledW) / 2f
+            val dy = (targetDimension - scaledH) / 2f
+
+            canvas.save()
+            canvas.translate(dx, dy)
+            canvas.scale(scale, scale)
+            dom.setContainerSize(naturalW, naturalH)
+            dom.render(canvas)
+            canvas.restore()
+
+            surface.makeImageSnapshot().toComposeImageBitmap()
+        } catch (_: Exception) {
+            null
+        }
     }
 
     suspend fun getIcon(iconFileName: String): ImageBitmap? = withContext(Dispatchers.IO) {
         iconCache[iconFileName]?.let { return@withContext it }
         val iconFile = File(iconsDir, iconFileName)
         if (!iconFile.exists()) return@withContext null
+
         try {
-            iconFile.inputStream().use { stream ->
-                val bitmap = loadImageBitmap(stream)
-                iconCache[iconFileName] = bitmap
+            if (isSvg(iconFile)) {
+                val bitmap = rasterizeSvg(iconFile, 128)
+                if (bitmap != null) {
+                    iconCache[iconFileName] = bitmap
+                }
                 bitmap
+            } else {
+                iconFile.inputStream().use { stream ->
+                    val bitmap = loadImageBitmap(stream)
+                    iconCache[iconFileName] = bitmap
+                    bitmap
+                }
             }
         } catch (_: Exception) {
             null
@@ -42,6 +92,14 @@ object MarkerIconCache {
         val key = "${file.absolutePath}_${file.lastModified()}_$maxDimension"
         thumbnailCache[key]?.let { return@withContext it }
         if (!file.exists()) return@withContext null
+
+        if (isSvg(file)) {
+            val bmp = rasterizeSvg(file, maxDimension)
+            if (bmp != null) {
+                thumbnailCache[key] = bmp
+            }
+            return@withContext bmp
+        }
 
         try {
             val src = ImageIO.read(file) ?: return@withContext null
@@ -82,6 +140,12 @@ object MarkerIconCache {
                 null
             }
         }
+    }
+
+    fun invalidate(iconFileName: String) {
+        iconCache.remove(iconFileName)
+        val file = File(iconsDir, iconFileName)
+        thumbnailCache.keys.removeIf { it.startsWith(file.absolutePath) }
     }
 
     fun clear() {

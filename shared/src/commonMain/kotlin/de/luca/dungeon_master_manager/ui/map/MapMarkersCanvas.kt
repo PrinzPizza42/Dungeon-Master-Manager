@@ -12,8 +12,10 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.isPrimaryPressed
 import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
@@ -21,6 +23,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import de.luca.dungeon_master_manager.data.MapMarker
 import de.luca.dungeonmastermanager.database.Entity
+import java.awt.Cursor
 import kotlin.math.pow
 import kotlin.math.sqrt
 
@@ -43,6 +46,8 @@ fun MapMarkersCanvas(
     onOpenEntityPopout: (String) -> Unit,
     onEditMarker: (MapMarker) -> Unit,
     onDeleteMarker: (MapMarker) -> Unit,
+    addPinMode: Boolean = false,
+    onAddPin: ((x: Float, y: Float) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
@@ -110,12 +115,17 @@ fun MapMarkersCanvas(
 
     var hoveredMarker by remember { mutableStateOf<MarkerRenderData?>(null) }
     var contextMenuMarker by remember { mutableStateOf<MarkerRenderData?>(null) }
+    var emptySpaceContextMenuPos by remember { mutableStateOf<Offset?>(null) }
 
-    Box(modifier = modifier) {
+    val cursorModifier = if (addPinMode) {
+        Modifier.pointerHoverIcon(PointerIcon(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR)))
+    } else Modifier
+
+    Box(modifier = modifier.then(cursorModifier)) {
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(renderDataList, mapWidthPx, mapHeightPx) {
+                .pointerInput(renderDataList, mapWidthPx, mapHeightPx, addPinMode) {
                     awaitPointerEventScope {
                         while (true) {
                             val event = awaitPointerEvent()
@@ -139,9 +149,13 @@ fun MapMarkersCanvas(
 
                             when (event.type) {
                                 PointerEventType.Move -> {
-                                    val found = findMarkerAt(pos)
-                                    if (hoveredMarker?.marker?.id != found?.marker?.id) {
-                                        hoveredMarker = found
+                                    if (!addPinMode) {
+                                        val found = findMarkerAt(pos)
+                                        if (hoveredMarker?.marker?.id != found?.marker?.id) {
+                                            hoveredMarker = found
+                                        }
+                                    } else {
+                                        hoveredMarker = null
                                     }
                                 }
 
@@ -150,21 +164,39 @@ fun MapMarkersCanvas(
                                 }
 
                                 PointerEventType.Press -> {
-                                    val found = findMarkerAt(pos)
-                                    if (found != null) {
-                                        if (event.buttons.isSecondaryPressed) {
-                                            contextMenuMarker = found
+                                    if (addPinMode && onAddPin != null) {
+                                        if (mapWidthPx > 0f && mapHeightPx > 0f) {
+                                            val x = (pos.x / mapWidthPx).coerceIn(0f, 1f)
+                                            val y = (pos.y / mapHeightPx).coerceIn(0f, 1f)
+                                            onAddPin(x, y)
                                             event.changes.forEach { it.consume() }
-                                        } else if (event.buttons.isPrimaryPressed) {
-                                            if (found.marker.isEntityLinked && found.marker.entityId != null) {
-                                                val ent = entityById[found.marker.entityId]
-                                                if (ent != null) {
-                                                    onOpenEntityPopout(ent.name)
+                                        }
+                                    } else {
+                                        val found = findMarkerAt(pos)
+                                        if (found != null) {
+                                            if (event.buttons.isSecondaryPressed) {
+                                                contextMenuMarker = found
+                                                emptySpaceContextMenuPos = null
+                                                event.changes.forEach { it.consume() }
+                                            } else if (event.buttons.isPrimaryPressed) {
+                                                if (found.marker.isEntityLinked && found.marker.entityId != null) {
+                                                    val ent = entityById[found.marker.entityId]
+                                                    if (ent != null) {
+                                                        onOpenEntityPopout(ent.name)
+                                                    }
+                                                } else {
+                                                    onEditMarker(found.marker)
                                                 }
-                                            } else {
-                                                onEditMarker(found.marker)
+                                                event.changes.forEach { it.consume() }
                                             }
-                                            event.changes.forEach { it.consume() }
+                                        } else if (event.buttons.isSecondaryPressed && onAddPin != null) {
+                                            if (mapWidthPx > 0f && mapHeightPx > 0f) {
+                                                val x = (pos.x / mapWidthPx).coerceIn(0f, 1f)
+                                                val y = (pos.y / mapHeightPx).coerceIn(0f, 1f)
+                                                emptySpaceContextMenuPos = Offset(x, y)
+                                                contextMenuMarker = null
+                                                event.changes.forEach { it.consume() }
+                                            }
                                         }
                                     }
                                 }
@@ -277,6 +309,30 @@ fun MapMarkersCanvas(
                             )
                         }
                     }
+                }
+            }
+        }
+
+        // Empty space context menu to add marker directly via right click
+        if (emptySpaceContextMenuPos != null && onAddPin != null) {
+            val p = emptySpaceContextMenuPos!!
+            val cx = p.x * mapWidthPx
+            val cy = p.y * mapHeightPx
+            val menuX = with(density) { cx.toDp() }
+            val menuY = with(density) { cy.toDp() }
+
+            Box(modifier = Modifier.offset(x = menuX, y = menuY)) {
+                DropdownMenu(
+                    expanded = true,
+                    onDismissRequest = { emptySpaceContextMenuPos = null }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Add Pin here") },
+                        onClick = {
+                            emptySpaceContextMenuPos = null
+                            onAddPin(p.x, p.y)
+                        }
+                    )
                 }
             }
         }

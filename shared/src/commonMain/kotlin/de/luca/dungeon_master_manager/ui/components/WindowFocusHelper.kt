@@ -24,27 +24,30 @@ fun Window.bringToFrontAndFocus() {
                 state = state and Frame.ICONIFIED.inv()
             }
 
-            if (WindowsDwmHelper.isWindows) {
+            val activatedNatively = if (WindowsDwmHelper.isWindows) {
                 WindowsDwmHelper.activate(this)
-            }
+            } else false
 
-            val wasAlwaysOnTop = isAlwaysOnTop
-            if (!wasAlwaysOnTop) {
-                isAlwaysOnTop = true
-            }
             toFront()
             requestFocus()
 
-            if (!wasAlwaysOnTop) {
-                // Keep always-on-top briefly (150ms) so the OS window manager processes the Z-order elevation,
-                // then release it so normal window stacking behavior resumes.
-                val timer = Timer(150) {
-                    try {
-                        isAlwaysOnTop = false
-                    } catch (_: Throwable) {}
+            // On Linux/X11 or if native activation failed, use the isAlwaysOnTop elevation trick
+            if (!activatedNatively) {
+                val wasAlwaysOnTop = isAlwaysOnTop
+                if (!wasAlwaysOnTop) {
+                    isAlwaysOnTop = true
                 }
-                timer.isRepeats = false
-                timer.start()
+                if (!wasAlwaysOnTop) {
+                    // Keep always-on-top briefly (150ms) so the OS window manager processes the Z-order elevation,
+                    // then release it so normal window stacking behavior resumes.
+                    val timer = Timer(150) {
+                        try {
+                            isAlwaysOnTop = false
+                        } catch (_: Throwable) {}
+                    }
+                    timer.isRepeats = false
+                    timer.start()
+                }
             }
         } catch (_: Throwable) {
             try {

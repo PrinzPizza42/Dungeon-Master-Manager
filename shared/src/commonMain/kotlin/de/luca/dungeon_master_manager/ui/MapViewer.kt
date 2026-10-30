@@ -51,7 +51,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import de.luca.dungeon_master_manager.data.MapData
 import de.luca.dungeon_master_manager.data.MapMarker
 import de.luca.dungeon_master_manager.random
+import de.luca.dungeon_master_manager.data.DefaultMarkerIcons
 import de.luca.dungeon_master_manager.ui.map.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Refresh
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
@@ -379,35 +384,6 @@ fun MapViewer(
                             viewportSize = viewportSize,
                             modifier = Modifier.fillMaxSize()
                         )
-
-                        if (addPinMode) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .pointerInput(Unit) {
-                                        awaitPointerEventScope {
-                                            while (true) {
-                                                val event = awaitPointerEvent()
-                                                if (event.type == androidx.compose.ui.input.pointer.PointerEventType.Press) {
-                                                    val position = event.changes.first().position
-                                                    val x = (position.x / baseMapWidth).coerceIn(0f, 1f)
-                                                    val y = (position.y / baseMapHeight).coerceIn(0f, 1f)
-
-                                                    val newMarker = MapMarker(
-                                                        id = UUID.randomUUID().toString(),
-                                                        x = x,
-                                                        y = y,
-                                                        isEntityLinked = false
-                                                    )
-                                                    showMarkerDialog = newMarker
-                                                    addPinMode = false
-                                                    event.changes.forEach { it.consume() }
-                                                }
-                                            }
-                                        }
-                                    }
-                            )
-                        }
                     }
 
                     if (!isEcoMode) {
@@ -431,6 +407,17 @@ fun MapViewer(
                         onDeleteMarker = { markerToDelete ->
                             mapData = mapData.copy(markers = mapData.markers.filter { it.id != markerToDelete.id })
                             saveMap()
+                        },
+                        addPinMode = addPinMode,
+                        onAddPin = { x, y ->
+                            val newMarker = MapMarker(
+                                id = UUID.randomUUID().toString(),
+                                x = x,
+                                y = y,
+                                isEntityLinked = false
+                            )
+                            showMarkerDialog = newMarker
+                            addPinMode = false
                         },
                         modifier = Modifier.fillMaxSize()
                     )
@@ -630,12 +617,71 @@ fun ThumbnailImage(file: File, modifier: Modifier = Modifier) {
             bitmap = bitmap!!,
             contentDescription = null,
             modifier = modifier,
-            contentScale = androidx.compose.ui.layout.ContentScale.Crop
+            alignment = Alignment.Center,
+            contentScale = androidx.compose.ui.layout.ContentScale.Fit
         )
     } else {
         Box(modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(modifier = Modifier.size(24.dp))
+            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
         }
+    }
+}
+
+private fun pickAndImportMarkerIcon(onSuccess: (String) -> Unit) {
+    try {
+        val dialog = java.awt.FileDialog(null as java.awt.Frame?, "Select Marker Icon", java.awt.FileDialog.LOAD)
+        dialog.setFilenameFilter { _, name ->
+            val ext = name.substringAfterLast('.', "").lowercase()
+            ext in MarkerIconCache.SUPPORTED_EXTENSIONS
+        }
+        dialog.isVisible = true
+        val dir = dialog.directory
+        val fileName = dialog.file
+        if (dir != null && fileName != null) {
+            val srcFile = File(dir, fileName)
+            if (srcFile.exists()) {
+                val targetDir = MarkerIconCache.iconsDir
+                targetDir.mkdirs()
+                var destFile = File(targetDir, srcFile.name)
+                if (destFile.exists() && destFile.canonicalPath != srcFile.canonicalPath) {
+                    val base = srcFile.nameWithoutExtension
+                    val ext = srcFile.extension
+                    var counter = 1
+                    while (destFile.exists()) {
+                        destFile = File(targetDir, "${base}_$counter.$ext")
+                        counter++
+                    }
+                }
+                if (destFile.canonicalPath != srcFile.canonicalPath) {
+                    srcFile.copyTo(destFile, overwrite = true)
+                }
+                MarkerIconCache.invalidate(destFile.name)
+                onSuccess(destFile.name)
+            }
+        }
+    } catch (_: Exception) {}
+}
+
+private fun openMarkerIconsFolder() {
+    val dir = MarkerIconCache.iconsDir
+    dir.mkdirs()
+    try {
+        if (java.awt.Desktop.isDesktopSupported() && java.awt.Desktop.getDesktop().isSupported(java.awt.Desktop.Action.OPEN)) {
+            java.awt.Desktop.getDesktop().open(dir)
+        } else {
+            val os = System.getProperty("os.name").lowercase()
+            if (os.contains("win")) {
+                ProcessBuilder("explorer.exe", dir.absolutePath).start()
+            } else if (os.contains("mac")) {
+                ProcessBuilder("open", dir.absolutePath).start()
+            } else {
+                ProcessBuilder("xdg-open", dir.absolutePath).start()
+            }
+        }
+    } catch (_: Exception) {
+        try {
+            ProcessBuilder("explorer.exe", dir.absolutePath).start()
+        } catch (_: Exception) {}
     }
 }
 
@@ -735,50 +781,156 @@ fun MapMarkerDialog(
                     )
                 }
 
-                if (!isEntityLinked) {
-                    Spacer(Modifier.height(16.dp))
-                    Text("Marker Icon", style = MaterialTheme.typography.labelLarge)
-                    Spacer(Modifier.height(8.dp))
-                    var availableIcons by remember { mutableStateOf<List<File>>(emptyList()) }
+                Spacer(Modifier.height(16.dp))
 
-                    LaunchedEffect(Unit) {
-                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            val iconsDir = File(System.getProperty("user.home"), ".dungeon-master-manager/.global/Icons")
-                            iconsDir.mkdirs()
-                            availableIcons = iconsDir.listFiles()?.filter { it.isFile && it.extension.lowercase() in listOf("png", "jpg", "jpeg", "webp") }?.sortedBy { it.name } ?: emptyList()
+                var reloadIconsTrigger by remember { mutableStateOf(0) }
+                var availableIcons by remember { mutableStateOf<List<File>>(emptyList()) }
+
+                LaunchedEffect(reloadIconsTrigger) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        val iconsDir = MarkerIconCache.iconsDir
+                        DefaultMarkerIcons.ensureDefaultIcons(iconsDir)
+                        availableIcons = iconsDir.listFiles()
+                            ?.filter { it.isFile && it.extension.lowercase() in MarkerIconCache.SUPPORTED_EXTENSIONS }
+                            ?.sortedBy { it.name }
+                            ?: emptyList()
+                    }
+                }
+
+                val parsedColor = remember(color) {
+                    try {
+                        Color(color.toULong())
+                    } catch (e: Exception) {
+                        Color.White
+                    }
+                }
+                val entityColor = remember(selectedEntityId, projectEntities, globalEntities) {
+                    val ent = (projectEntities + globalEntities).find { it.id == selectedEntityId }
+                    if (ent?.color != null) {
+                        try { Color(ent.color.toULong()) } catch (_: Exception) { Color.Red }
+                    } else Color.Red
+                }
+                val showColorPicker = remember { mutableStateOf(false) }
+
+                // 1. Color Picker Row (Only for standalone markers)
+                if (!isEntityLinked) {
+                    Spacer(Modifier.height(14.dp))
+                    Text("Marker Color", style = MaterialTheme.typography.labelLarge)
+                    Spacer(Modifier.height(6.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        colorElement(
+                            currentColor = parsedColor,
+                            showPopup = showColorPicker,
+                            onClick = { inputColor ->
+                                color = inputColor.value.toString()
+                            }
+                        )
+                    }
+                }
+
+                // 2. Marker Icon Selection (Row below color)
+                Spacer(Modifier.height(14.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Marker Icon", style = MaterialTheme.typography.labelLarge)
+                    Spacer(Modifier.weight(1f))
+                    IconButton(
+                        onClick = {
+                            pickAndImportMarkerIcon { importedName ->
+                                reloadIconsTrigger++
+                                iconFileName = importedName
+                            }
+                        },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Icon hinzufügen",
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = { openMarkerIconsFolder() },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FolderOpen,
+                            contentDescription = "Icon-Ordner öffnen",
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = { reloadIconsTrigger++ },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Icons neu laden",
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(6.dp))
+
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                ) {
+                    // "No Icon" (revert to dot) option
+                    item {
+                        val isNoneSelected = iconFileName == null
+                        val dotColor = if (isEntityLinked) entityColor else parsedColor
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isNoneSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                .then(
+                                    if (isNoneSelected) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
+                                    else Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                )
+                                .clickable { iconFileName = null }
+                                .padding(4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clip(CircleShape)
+                                    .background(dotColor)
+                                    .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                            )
                         }
                     }
 
-                    val showColorPicker = remember { mutableStateOf(false) }
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        item {
-                            val parsedColor = try {
-                                Color(color.toULong())
-                            } catch (e: Exception) {
-                                Color.White
-                            }
-
-                            colorElement(
-                                currentColor = parsedColor,
-                                showPopup = showColorPicker,
-                                onClick = { inputColor ->
-                                    color = inputColor.value.toString()
+                    // Available Icons
+                    items(availableIcons) { iconFile ->
+                        val isSelected = iconFileName == iconFile.name
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                .then(
+                                    if (isSelected) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
+                                    else Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                )
+                                .clickable {
+                                    // Toggle: clicking selected icon reverts to dot
+                                    iconFileName = if (isSelected) null else iconFile.name
                                 }
-                            )
-                        }
-
-                        items(availableIcons) { iconFile ->
-                            Box(
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .clip(MaterialTheme.shapes.small)
-                                    .background(if (iconFileName == iconFile.name) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
-                                    .clickable { iconFileName = iconFile.name }
-                                    .padding(4.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                ThumbnailImage(file = iconFile, modifier = Modifier.fillMaxSize())
-                            }
+                                .padding(4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            ThumbnailImage(file = iconFile, modifier = Modifier.fillMaxSize())
                         }
                     }
                 }

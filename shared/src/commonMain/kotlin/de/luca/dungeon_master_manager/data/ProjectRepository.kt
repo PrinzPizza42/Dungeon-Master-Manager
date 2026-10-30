@@ -19,6 +19,9 @@ class ProjectRepository {
         val globalDir: File
             get() = File(baseDir, ".global")
 
+        val globalIconsDir: File
+            get() = File(globalDir, "Icons")
+
         val globalNotesDir: File
             get() = File(globalDir, "Notes")
 
@@ -29,7 +32,20 @@ class ProjectRepository {
         /** Ensure global directories exist. */
         fun ensureGlobalDirs() {
             globalDir.mkdirs()
-            File(globalDir, "marker-icons").mkdirs()
+            globalIconsDir.mkdirs()
+            
+            // Migrate legacy marker-icons if present
+            val legacyIcons = File(globalDir, "marker-icons")
+            if (legacyIcons.exists() && legacyIcons.isDirectory) {
+                legacyIcons.listFiles()?.forEach { file ->
+                    val target = File(globalIconsDir, file.name)
+                    if (!target.exists()) {
+                        try { file.copyTo(target) } catch (_: Exception) {}
+                    }
+                }
+            }
+
+            DefaultMarkerIcons.ensureDefaultIcons(globalIconsDir)
             globalNotesDir.mkdirs()
             defaultEntityFolders.forEach { File(globalNotesDir, it).mkdirs() }
         }

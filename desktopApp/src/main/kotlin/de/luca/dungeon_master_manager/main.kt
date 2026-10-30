@@ -15,7 +15,12 @@ private data class OpenEntityPopoutWindow(
     val focusTrigger: Int = 0
 )
 
-fun main() = application {
+fun main() {
+    if (System.getProperty("skiko.renderApi") == null) {
+        System.setProperty("skiko.renderApi", "OPENGL")
+    }
+
+    application {
     val openEntityWindows = remember { mutableStateListOf<OpenEntityPopoutWindow>() }
     var mainWindowTitle by remember { mutableStateOf("Dungeon Master Manager") }
     val mainWindowState = rememberWindowState(width = 1200.dp, height = 800.dp)
@@ -88,4 +93,5 @@ fun main() = application {
             }
         }
     }
+}
 }
