@@ -1,7 +1,7 @@
 package de.luca.dungeon_master_manager.data
 
 object FileExtensions {
-    val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "webp", "bmp", "gif", "ico")
+    val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "webp", "bmp", "gif", "ico", "svg")
     val TEXT_EXTENSIONS = setOf("txt", "text", "log", "json", "csv", "yaml", "yml", "xml")
     val MARKDOWN_EXTENSIONS = setOf("md")
     val MAP_EXTENSIONS = setOf("map")

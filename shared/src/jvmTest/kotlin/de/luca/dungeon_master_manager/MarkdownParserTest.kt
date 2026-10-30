@@ -15,6 +15,9 @@ import de.luca.dungeon_master_manager.ui.VerticalTextLayout
 import de.luca.dungeon_master_manager.ui.calculateVerticalMove
 import de.luca.dungeon_master_manager.ui.expandMarkdownTokenSelection
 import de.luca.dungeon_master_manager.ui.findEntityAtPosition
+import de.luca.dungeon_master_manager.ui.findImageLinkAtPosition
+import de.luca.dungeon_master_manager.ui.resolveImageFile
+import de.luca.dungeon_master_manager.ui.components.ImagePickerHelper
 import de.luca.dungeon_master_manager.ui.parseMarkdown
 import de.luca.dungeon_master_manager.ui.replaceEntityQueryWithLink
 import de.luca.dungeonmastermanager.database.Entity
@@ -102,7 +105,8 @@ class MarkdownParserTest {
             name = "Grom the Goblin King",
             type = "NPC",
             color = null,
-            notesFilePath = null
+            notesFilePath = null,
+            imageFilePath = null
         )
         
         // Cursor at offset 0 -> outside entity
@@ -126,7 +130,8 @@ class MarkdownParserTest {
             name = "Grom the Goblin King",
             type = "NPC",
             color = null,
-            notesFilePath = null
+            notesFilePath = null,
+            imageFilePath = null
         )
         
         // Cursor at offset 12 (inside "goblin_king")
@@ -145,7 +150,8 @@ class MarkdownParserTest {
             name = "Named Entity",
             type = "NPC",
             color = null,
-            notesFilePath = null
+            notesFilePath = null,
+            imageFilePath = null
         )
         
         // Test with cursor at start (everything hidden)
@@ -188,8 +194,8 @@ class MarkdownParserTest {
 
     @Test
     fun testMultipleEntities_IndependentFocus() {
-        val mockEnt1 = Entity("e1", "Hero", "NPC", null, null)
-        val mockEnt2 = Entity("e2", "Villain", "NPC", null, null)
+        val mockEnt1 = Entity("e1", "Hero", "NPC", null, null, null)
+        val mockEnt2 = Entity("e2", "Villain", "NPC", null, null, null)
         val text = "@[e1] vs @[e2]"
 
         // Focus inside @[e1] (offset 2)
@@ -244,8 +250,8 @@ wawdawawdawdawdawwd awd awdwd awdawd awd awd awdwd awdwdadadawdawd awd
 
 """.trimIndent()
 
-        val mockEnt1 = Entity("a904acec-6288-433d-84b3-2b4060eb23a2", "Test NPC 1", "NPC", null, null)
-        val mockEnt2 = Entity("d2d19c17-f139-4473-89cd-d6b4af1209d3", "Jerry", "NPC", null, null)
+        val mockEnt1 = Entity("a904acec-6288-433d-84b3-2b4060eb23a2", "Test NPC 1", "NPC", null, null, null)
+        val mockEnt2 = Entity("d2d19c17-f139-4473-89cd-d6b4af1209d3", "Jerry", "NPC", null, null, null)
         val entities = listOf(mockEnt1, mockEnt2)
 
         for (cursor in 0..mainMdContent.length) {
@@ -264,7 +270,7 @@ wawdawawdawdawdawwd awd awdwd awdawd awd awd awdwd awdwdadadawdawd awd
     @Test
     fun testEntityBoundary_CursorAtFirstChar_StaysCollapsed() {
         val text = "Before @[goblin] after"
-        val mockEnt = Entity("goblin", "Grom", "NPC", null, null)
+        val mockEnt = Entity("goblin", "Grom", "NPC", null, null, null)
         // Cursor at offset 7 (the position of '@')
         val (annotated, _) = parseMarkdown(text, primaryColor, TextRange(7), listOf(mockEnt), fantasyFamily)
         // At the boundary, entity stays collapsed as "Grom" so arrow navigation past it doesn't explode
@@ -274,7 +280,7 @@ wawdawawdawdawdawwd awd awdwd awdawd awd awd awdwd awdwdadadawdawd awd
     @Test
     fun testEntityClick_ExpandsCorrectly() {
         val text = "Before @[goblin] after"
-        val mockEnt = Entity("goblin", "Grom", "NPC", null, null)
+        val mockEnt = Entity("goblin", "Grom", "NPC", null, null, null)
         // Initially cursor is outside (offset 0)
         val (_, mapping) = parseMarkdown(text, primaryColor, TextRange(0), listOf(mockEnt), fantasyFamily)
         // User clicks on character 'r' in "Grom" (transformed offset 8: "Before G" is 8)
@@ -498,8 +504,8 @@ wawdawawdawdawdawwd awd awdwd awdawd awd awd awdwd awdwdadadawdawd awd
 
     @Test
     fun testVerticalMove_LongToShortToEmptyToLong_PreservesStickyX_WithHiddenMarkdownAndEntities() {
-        val ent1 = Entity("a904acec-6288-433d-84b3-2b4060eb23a2", "Test NPC 1", "NPC", null, null)
-        val ent2 = Entity("d2d19c17-f139-4473-89cd-d6b4af1209d3", "Jerry", "NPC", null, null)
+        val ent1 = Entity("a904acec-6288-433d-84b3-2b4060eb23a2", "Test NPC 1", "NPC", null, null, null)
+        val ent2 = Entity("d2d19c17-f139-4473-89cd-d6b4af1209d3", "Jerry", "NPC", null, null, null)
         val entities = listOf(ent1, ent2)
 
         val lines = listOf(
@@ -580,8 +586,8 @@ wawdawawdawdawdawwd awd awdwd awdawd awd awd awdwd awdwdadadawdawd awd
 
     @Test
     fun testVerticalMove_FromInsideExpandedEntity_OntoShorterAndEmptyLine_NeverGetsStuck() {
-        val ent1 = Entity("a904acec-6288-433d-84b3-2b4060eb23a2", "Test NPC 1", "NPC", null, null)
-        val ent2 = Entity("d2d19c17-f139-4473-89cd-d6b4af1209d3", "Jerry", "NPC", null, null)
+        val ent1 = Entity("a904acec-6288-433d-84b3-2b4060eb23a2", "Test NPC 1", "NPC", null, null, null)
+        val ent2 = Entity("d2d19c17-f139-4473-89cd-d6b4af1209d3", "Jerry", "NPC", null, null, null)
         val entities = listOf(ent1, ent2)
 
         val doc = listOf(
@@ -622,7 +628,7 @@ wawdawawdawdawdawwd awd awdwd awdawd awd awd awdwd awdwdadadawdawd awd
 
     @Test
     fun testVerticalMove_SoftWrappedExpandedEntity_ExitsInSingleKeyPress_UpAndDown() {
-        val ent = Entity("a904acec-6288-433d-84b3-2b4060eb23a2", "NPC", "NPC", null, null)
+        val ent = Entity("a904acec-6288-433d-84b3-2b4060eb23a2", "NPC", "NPC", null, null, null)
         val doc = listOf(
             "Obere Zeile",
             "Vor @[a904acec-6288-433d-84b3-2b4060eb23a2]",
@@ -740,8 +746,8 @@ wawdawawdawdawdawwd awd awdwd awdawd awd awd awdwd awdwdadadawdawd awd
 """.trimIndent()
 
         val entities = listOf(
-            Entity("a904acec-6288-433d-84b3-2b4060eb23a2", "Test NPC 1", "NPC", null, null),
-            Entity("d2d19c17-f139-4473-89cd-d6b4af1209d3", "Jerry", "NPC", null, null)
+            Entity("a904acec-6288-433d-84b3-2b4060eb23a2", "Test NPC 1", "NPC", null, null, null),
+            Entity("d2d19c17-f139-4473-89cd-d6b4af1209d3", "Jerry", "NPC", null, null, null)
         )
 
         // Start far to the right on the long "Jerry wdawdawdaw..." line
@@ -891,7 +897,7 @@ wawdawawdawdawdawwd awd awdwd awdawd awd awd awdwd awdwdadadawdawd awd
         assertEquals("Treffe @[replaced-end-id]".length, sel6End.start)
 
         // Verify that the resulting text with the new selection keeps the entity collapsed when parsed!
-        val mockEnt = Entity("king-id", "The King", "NPC", null, null)
+        val mockEnt = Entity("king-id", "The King", "NPC", null, null, null)
         val (annotated, _) = parseMarkdown(text3, primaryColor, sel3, listOf(mockEnt), fantasyFamily)
         assertEquals("Boss is The King", annotated.text, "Entity must be collapsed when cursor lands right after ']'")
     }
@@ -1000,7 +1006,7 @@ wawdawawdawdawdawwd awd awdwd awdawd awd awd awdwd awdwdadadawdawd awd
 
     @Test
     fun testFindEntityAtPosition_HoverDetection() {
-        val ent1 = Entity("id-grom", "Grom the Goblin", "NPC", null, null)
+        val ent1 = Entity("id-grom", "Grom the Goblin", "NPC", null, null, null)
         val text = "Meet @[id-grom] here."
         val (annotated, mapping) = parseMarkdown(text, primaryColor, TextRange(0), listOf(ent1), fantasyFamily)
         assertEquals("Meet Grom the Goblin here.", annotated.text)
@@ -1043,5 +1049,167 @@ wawdawawdawdawdawwd awd awdwd awdawd awd awd awdwd awdwdadadawdawd awd
 
         // Null layout returns null
         assertEquals(null, findEntityAtPosition(posOverGrom, null as EntityHoverTextLayout?, mapping, text, listOf(ent1)))
+    }
+
+    @Test
+    fun testImageLink_CursorOutside_HidesSyntaxAndShowsIconAndTitle() {
+        val text = "Look at [Dragon Cave](Maps/cave.png) now."
+        val (annotated, mapping) = parseMarkdown(text, primaryColor, TextRange(0), emptyList(), fantasyFamily)
+
+        // Collapsed to "Look at 🖼 Dragon Cave now."
+        assertEquals("Look at 🖼 Dragon Cave now.", annotated.text)
+
+        val linkAnnotations = annotated.getStringAnnotations("image_link", 0, annotated.length)
+        assertEquals(1, linkAnnotations.size)
+        assertEquals("Maps/cave.png", linkAnnotations[0].item)
+
+        val titleAnnotations = annotated.getStringAnnotations("image_title", 0, annotated.length)
+        assertEquals(1, titleAnnotations.size)
+        assertEquals("Dragon Cave", titleAnnotations[0].item)
+
+        // Verify OffsetMapping
+        // 'L' (orig 0) -> trans 0
+        assertEquals(0, mapping.originalToTransformed(0))
+        // Click on 'D' in "Dragon" (trans 10) -> maps into the image link range in original text
+        val origForDragon = mapping.transformedToOriginal(10)
+        assertTrue(origForDragon in 8..35, "Transformed click inside collapsed link should map to original link range")
+    }
+
+    @Test
+    fun testImageLink_CursorInside_ShowsRawSyntax() {
+        val text = "Look at [Dragon Cave](Maps/cave.png) now."
+        // Cursor at index 12 (inside "Dragon")
+        val (annotated, mapping) = parseMarkdown(text, primaryColor, TextRange(12), emptyList(), fantasyFamily)
+
+        // Expanded for editing
+        assertEquals("Look at [Dragon Cave](Maps/cave.png) now.", annotated.text)
+        assertEquals(12, mapping.originalToTransformed(12))
+        assertEquals(12, mapping.transformedToOriginal(12))
+    }
+
+    @Test
+    fun testImageLink_BangPrefix_AlsoSupported() {
+        val text = "![Dragon](Images/dragon.png)"
+        val (annotated, _) = parseMarkdown(text, primaryColor, TextRange(0), emptyList(), fantasyFamily)
+
+        assertEquals("🖼 Dragon", annotated.text)
+        val linkAnnotations = annotated.getStringAnnotations("image_link", 0, annotated.length)
+        assertEquals("Images/dragon.png", linkAnnotations[0].item)
+    }
+
+    @Test
+    fun testNonImageLink_RemainsUncollapsed() {
+        val text = "Visit [Google](https://google.com) today."
+        val (annotated, _) = parseMarkdown(text, primaryColor, TextRange(0), emptyList(), fantasyFamily)
+
+        // Non-image markdown links should remain plain text without collapsing to 🖼
+        assertEquals("Visit [Google](https://google.com) today.", annotated.text)
+    }
+
+    @Test
+    fun testFindImageLinkAtPosition_HoverDetection() {
+        val text = "See [Dragon Cave](Maps/cave.png) here."
+        val (annotated, mapping) = parseMarkdown(text, primaryColor, TextRange(0), emptyList(), fantasyFamily)
+        assertEquals("See 🖼 Dragon Cave here.", annotated.text)
+
+        val mockLayout = object : EntityHoverTextLayout {
+            override val textLength: Int get() = annotated.text.length
+            override fun getBoundingBox(offset: Int): Rect {
+                val x = offset * 10f
+                return Rect(x, 0f, x + 10f, 20f)
+            }
+        }
+
+        // "🖼 Dragon Cave" starts at transformed index 4 ("See ") -> x from 40f to (4 + 15) * 10 = 190f
+        val posOverLink = Offset(60f, 10f)
+        val hit = findImageLinkAtPosition(posOverLink, mockLayout, mapping, text, "")
+        assertTrue(hit != null, "Hovering over image link text must find the link")
+        assertEquals("Dragon Cave", hit.title)
+        assertEquals("Maps/cave.png", hit.relativePath)
+
+        // Hovering over "See " (x = 10f) -> null
+        val posOverSee = Offset(10f, 10f)
+        val hitSee = findImageLinkAtPosition(posOverSee, mockLayout, mapping, text, "")
+        assertEquals(null, hitSee, "Hovering over normal text must return null")
+
+        // Hovering far to right -> null
+        val posFar = Offset(500f, 10f)
+        assertEquals(null, findImageLinkAtPosition(posFar, mockLayout, mapping, text, ""))
+    }
+
+    @Test
+    fun testResolveImageFile_Normalization() {
+        val projectPath = java.io.File(System.getProperty("java.io.tmpdir"), "test_dm_project").absolutePath
+        val testFile = java.io.File(projectPath, "Images/sub/test.png")
+        testFile.parentFile.mkdirs()
+        testFile.writeText("dummy")
+
+        try {
+            // Forward slash in relative path
+            val resolved1 = resolveImageFile("Images/sub/test.png", projectPath)
+            assertTrue(resolved1 != null && resolved1.exists())
+            assertEquals(testFile.canonicalPath, resolved1.canonicalPath)
+
+            // Backslash in relative path
+            val resolved2 = resolveImageFile("Images\\sub\\test.png", projectPath)
+            assertTrue(resolved2 != null && resolved2.exists())
+            assertEquals(testFile.canonicalPath, resolved2.canonicalPath)
+        } finally {
+            testFile.delete()
+            testFile.parentFile.delete()
+        }
+    }
+
+    @Test
+    fun testImagePickerHelper_ScanProjectImages() {
+        val tempDir = java.io.File(System.getProperty("java.io.tmpdir"), "test_picker_scan_${System.currentTimeMillis()}")
+        tempDir.mkdirs()
+
+        try {
+            val img1 = java.io.File(tempDir, "Images/dragon.png").also { it.parentFile.mkdirs(); it.writeText("img") }
+            val img2 = java.io.File(tempDir, "Maps/dungeon.webp").also { it.parentFile.mkdirs(); it.writeText("img") }
+            val ignoredGit = java.io.File(tempDir, ".git/ignored.png").also { it.parentFile.mkdirs(); it.writeText("git") }
+            val nonImg = java.io.File(tempDir, "Notes/session.md").also { it.parentFile.mkdirs(); it.writeText("md") }
+
+            val scanned = ImagePickerHelper.scanProjectImages(tempDir.absolutePath)
+            assertEquals(2, scanned.size)
+            assertTrue(scanned.any { it.name == "dragon.png" })
+            assertTrue(scanned.any { it.name == "dungeon.webp" })
+            assertTrue(scanned.none { it.name == "ignored.png" })
+            assertTrue(scanned.none { it.name == "session.md" })
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testImagePickerHelper_ToRelativeProjectPath() {
+        val tempDir = java.io.File(System.getProperty("java.io.tmpdir"), "test_picker_rel")
+        val file = java.io.File(tempDir, "SubFolder/MyImage.png")
+
+        val rel = ImagePickerHelper.toRelativeProjectPath(file, tempDir.absolutePath)
+        assertEquals("SubFolder/MyImage.png", rel)
+    }
+
+    @Test
+    fun testImagePickerHelper_ConflictResolutionAndImport() {
+        val tempDir = java.io.File(System.getProperty("java.io.tmpdir"), "test_picker_import_${System.currentTimeMillis()}")
+        tempDir.mkdirs()
+        val externalImg = java.io.File(System.getProperty("java.io.tmpdir"), "external_pic.png").also { it.writeText("data") }
+
+        try {
+            // First import -> Images/external_pic.png
+            val imported1 = ImagePickerHelper.importExternalImage(externalImg, tempDir.absolutePath)
+            assertTrue(imported1 != null && imported1.exists())
+            assertEquals("external_pic.png", imported1.name)
+
+            // Second import -> Images/external_pic_1.png
+            val imported2 = ImagePickerHelper.importExternalImage(externalImg, tempDir.absolutePath)
+            assertTrue(imported2 != null && imported2.exists())
+            assertEquals("external_pic_1.png", imported2.name)
+        } finally {
+            externalImg.delete()
+            tempDir.deleteRecursively()
+        }
     }
 }

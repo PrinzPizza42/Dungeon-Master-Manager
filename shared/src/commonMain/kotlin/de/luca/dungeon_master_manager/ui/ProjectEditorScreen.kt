@@ -166,6 +166,18 @@ fun ProjectEditorScreen(
                             onOpenEntityPopout = { entityName ->
                                 onOpenEntityPopout(EntityPopoutRequest(entityName, viewModel.project.path))
                             },
+                            onOpenImageInTab = { relativeOrAbsolutePath ->
+                                val file = resolveImageFile(relativeOrAbsolutePath, viewModel.project.path)
+                                if (file != null && file.exists() && file.isFile) {
+                                    viewModel.openFile(
+                                        de.luca.dungeon_master_manager.data.FileNode(
+                                            name = file.name,
+                                            path = file.absolutePath,
+                                            isDirectory = false
+                                        )
+                                    )
+                                }
+                            },
                             entities = entities,
                             projectPath = viewModel.project.path
                         )

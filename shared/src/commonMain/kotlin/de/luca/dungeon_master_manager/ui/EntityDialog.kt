@@ -1,6 +1,7 @@
 package de.luca.dungeon_master_manager.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,7 +15,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -22,6 +25,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import de.luca.dungeon_master_manager.colorElement
 import de.luca.dungeon_master_manager.data.EntityPopoutRequest
+import de.luca.dungeon_master_manager.ui.components.rememberEntityImage
 import de.luca.dungeon_master_manager.ui.theme.GrimoireCard
 import de.luca.dungeon_master_manager.ui.theme.GrimoireColors
 import de.luca.dungeon_master_manager.ui.theme.GrimoireDivider
@@ -144,6 +148,7 @@ fun EntityManagerDialog(
                                     EntityRow(
                                         entity = entity,
                                         isGlobal = isShowingGlobal,
+                                        viewModel = viewModel,
                                         canCopy = !isGlobalOnly,
                                         onDelete = { viewModel.deleteEntity(isShowingGlobal, entity.id) },
                                         onCopy = { viewModel.copyEntity(entity, !isShowingGlobal) },
@@ -199,11 +204,11 @@ fun EntityManagerDialog(
                 showCreateDialog = false
                 entityToEdit = null 
             },
-            onCreate = { name, type, color, notesPath ->
+            onCreate = { name, type, color, notesPath, imagePath ->
                 if (entityToEdit != null) {
-                    viewModel.updateEntity(selectedTab == 1, entityToEdit!!.id, name, type, color, notesPath)
+                    viewModel.updateEntity(selectedTab == 1, entityToEdit!!.id, name, type, color, notesPath, imagePath)
                 } else {
-                    viewModel.addEntity(selectedTab == 1, name, type, color, notesPath)
+                    viewModel.addEntity(selectedTab == 1, name, type, color, notesPath, imagePath)
                 }
                 showCreateDialog = false
                 entityToEdit = null
@@ -216,6 +221,7 @@ fun EntityManagerDialog(
 private fun EntityRow(
     entity: Entity,
     isGlobal: Boolean,
+    viewModel: EntityViewModel,
     canCopy: Boolean,
     onDelete: (Entity) -> Unit,
     onCopy: (Entity) -> Unit,
@@ -232,12 +238,33 @@ private fun EntityRow(
             verticalAlignment = Alignment.CenterVertically
         ) {
             val colorVal = try { Color(entity.color?.toULong() ?: 0xFFFFFFFFuL) } catch(e: Exception) { GrimoireColors.GoldPrimary }
-            Box(
-                modifier = Modifier
-                    .size(16.dp)
-                    .background(colorVal, shape = RoundedCornerShape(3.dp))
-                    .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(3.dp))
-            )
+            val imageFile = remember(entity.imageFilePath, isGlobal) {
+                viewModel.resolveEntityImageFile(entity.imageFilePath, isGlobal)
+            }
+            val imageBitmap = rememberEntityImage(imageFile)
+
+            if (imageBitmap != null) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .border(1.5.dp, colorVal, RoundedCornerShape(4.dp))
+                        .background(GrimoireColors.SurfaceLow, shape = RoundedCornerShape(4.dp))
+                ) {
+                    Image(
+                        bitmap = imageBitmap,
+                        contentDescription = entity.name,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(4.dp))
+                    )
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(16.dp)
+                        .background(colorVal, shape = RoundedCornerShape(3.dp))
+                        .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(3.dp))
+                )
+            }
             Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -283,14 +310,18 @@ fun CreateEntityDialog(
     viewModel: EntityViewModel,
     initialEntity: Entity? = null,
     onDismiss: () -> Unit,
-    onCreate: (name: String, type: String, color: String, notesPath: String) -> Unit
+    onCreate: (name: String, type: String, color: String, notesPath: String, imagePath: String?) -> Unit
 ) {
     var name by remember { mutableStateOf(initialEntity?.name ?: "") }
     var type by remember { mutableStateOf(initialEntity?.type ?: "NPC") }
     var color by remember { mutableStateOf(initialEntity?.color ?: Color.Red.value.toString()) }
     var notesPath by remember { mutableStateOf(initialEntity?.notesFilePath ?: "") }
+    var imagePath by remember { mutableStateOf<String?>(initialEntity?.imageFilePath) }
     var showFileSelector by remember { mutableStateOf(false) }
     val showColorPicker = remember { mutableStateOf(false) }
+
+    val imageFile = remember(imagePath, isGlobal) { viewModel.resolveEntityImageFile(imagePath, isGlobal) }
+    val imageBitmap = rememberEntityImage(imageFile)
 
     val types = listOf("NPC", "PC", "Place", "Item", "Monster")
 
@@ -298,7 +329,7 @@ fun CreateEntityDialog(
         onDismissRequest = onDismiss,
         title = { 
             Text(
-                "New ${if (isGlobal) "Global " else ""}Entity",
+                if (initialEntity != null) "Edit ${if (isGlobal) "Global " else ""}Entity" else "New ${if (isGlobal) "Global " else ""}Entity",
                 style = MaterialTheme.typography.titleLarge,
                 color = GrimoireColors.GoldPrimary
             ) 
@@ -306,7 +337,7 @@ fun CreateEntityDialog(
         containerColor = GrimoireColors.SurfaceCard,
         shape = RoundedCornerShape(8.dp),
         text = {
-            Column {
+            Column(modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp)) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -351,8 +382,65 @@ fun CreateEntityDialog(
                         color = inputColor.value.toString()
                     }
                 )
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(12.dp))
                 
+                Text("Portrait / Image:", style = MaterialTheme.typography.labelMedium, color = GrimoireColors.ParchmentMuted)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(80.dp)
+                            .background(GrimoireColors.SurfaceLow, RoundedCornerShape(6.dp))
+                            .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(6.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (imageBitmap != null) {
+                            Image(
+                                bitmap = imageBitmap,
+                                contentDescription = "Entity Image Preview",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(6.dp))
+                            )
+                        } else {
+                            Text(
+                                "No Image",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = GrimoireColors.ParchmentDim
+                            )
+                        }
+                    }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                val file = pickExternalImageFile()
+                                if (file != null && file.exists()) {
+                                    val importedPath = viewModel.importEntityImage(file, isGlobal, name.ifBlank { "entity" })
+                                    imagePath = importedPath
+                                }
+                            },
+                            border = BorderStroke(1.dp, GrimoireColors.BorderBronze),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = GrimoireColors.GoldPrimary)
+                        ) {
+                            Text(if (imagePath.isNullOrBlank()) "Select Image..." else "Change Image...")
+                        }
+
+                        if (!imagePath.isNullOrBlank()) {
+                            TextButton(
+                                onClick = { imagePath = null },
+                                colors = ButtonDefaults.textButtonColors(contentColor = GrimoireColors.CrimsonError)
+                            ) {
+                                Text("Remove Image")
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+
                 Text("Notes File:", style = MaterialTheme.typography.labelMedium, color = GrimoireColors.ParchmentMuted)
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                     OutlinedTextField(
@@ -384,7 +472,7 @@ fun CreateEntityDialog(
             Button(
                 onClick = {
                     if (name.isNotBlank()) {
-                        onCreate(name, type, color, notesPath)
+                        onCreate(name, type, color, notesPath, imagePath)
                     }
                 },
                 colors = ButtonDefaults.buttonColors(
@@ -510,6 +598,18 @@ fun NotesFilePickerDialog(
 private fun pickExternalFile(): File? {
     val dialog = java.awt.FileDialog(null as java.awt.Frame?, "Select Markdown File", java.awt.FileDialog.LOAD)
     dialog.setFilenameFilter { _, name -> name.lowercase().endsWith(".md") }
+    dialog.isVisible = true
+    val dir = dialog.directory
+    val file = dialog.file
+    return if (dir != null && file != null) File(dir, file) else null
+}
+
+private fun pickExternalImageFile(): File? {
+    val dialog = java.awt.FileDialog(null as java.awt.Frame?, "Select Entity Image", java.awt.FileDialog.LOAD)
+    dialog.setFilenameFilter { _, name ->
+        val lower = name.lowercase()
+        lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".webp") || lower.endsWith(".svg")
+    }
     dialog.isVisible = true
     val dir = dialog.directory
     val file = dialog.file

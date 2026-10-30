@@ -25,6 +25,9 @@ class ProjectRepository {
         val globalNotesDir: File
             get() = File(globalDir, "Notes")
 
+        val globalImagesDir: File
+            get() = File(globalDir, "Images")
+
         val defaultEntityFolders = listOf(
             "NPCs", "PCs", "Places", "Items", "Monsters"
         )
@@ -33,6 +36,7 @@ class ProjectRepository {
         fun ensureGlobalDirs() {
             globalDir.mkdirs()
             globalIconsDir.mkdirs()
+            globalImagesDir.mkdirs()
             
             // Migrate legacy marker-icons if present
             val legacyIcons = File(globalDir, "marker-icons")
@@ -61,7 +65,7 @@ class ProjectRepository {
 
     /** Default subfolders created for every new project. */
     private val defaultFolders = listOf(
-        "Story", "Players", "Places", "NPCs", "Items", "Monsters", "Maps", "Notes"
+        "Story", "Players", "Places", "NPCs", "Items", "Monsters", "Maps", "Notes", "Images"
     )
 
     /** Scan for all projects that contain a valid `.project` file. */
@@ -92,6 +96,7 @@ class ProjectRepository {
 
         // Create default subfolders
         defaultFolders.forEach { File(projectDir, it).mkdirs() }
+        File(projectDir, "Images/Entities").mkdirs()
 
         // Starter story file
         File(projectDir, "Story/main.md").writeText("# Kapitel 1\n\nDein Abenteuer beginnt...\n")

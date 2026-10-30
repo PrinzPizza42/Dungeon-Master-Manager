@@ -34,6 +34,14 @@ object DatabaseHelper {
             // Check if tables exist
             try {
                 driver.executeQuery(null, "SELECT 1 FROM Entity LIMIT 1;", { QueryResult.Unit }, 0)
+                // Check if imageFilePath column exists, if not, add it
+                try {
+                    driver.executeQuery(null, "SELECT imageFilePath FROM Entity LIMIT 1;", { QueryResult.Unit }, 0)
+                } catch (_: Exception) {
+                    try {
+                        driver.execute(null, "ALTER TABLE Entity ADD COLUMN imageFilePath TEXT;", 0)
+                    } catch (_: Exception) {}
+                }
             } catch (e: Exception) {
                 // Table doesn't exist, create schema
                 AppDatabase.Schema.create(driver)

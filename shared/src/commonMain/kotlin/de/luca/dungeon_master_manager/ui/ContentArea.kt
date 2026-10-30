@@ -6,13 +6,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.key
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -36,6 +31,7 @@ fun ContentArea(
     onContentChange: (String) -> Unit,
     modifier: Modifier = Modifier,
     onOpenEntityPopout: (String) -> Unit = {},
+    onOpenImageInTab: (String) -> Unit = {},
     entities: List<de.luca.dungeonmastermanager.database.Entity> = emptyList(),
     projectPath: String = ""
 ) {
@@ -77,6 +73,8 @@ fun ContentArea(
                             onContentChange = onContentChange,
                             modifier = Modifier.fillMaxSize(),
                             onOpenEntityPopout = onOpenEntityPopout,
+                            onOpenImageInTab = onOpenImageInTab,
+                            projectPath = projectPath,
                             entities = entities
                         )
                     }

@@ -73,10 +73,21 @@ import de.luca.dungeon_master_manager.ui.theme.tiledTexture
 import dungeon_master_manager.shared.generated.resources.Res
 import dungeon_master_manager.shared.generated.resources.grimoire_vellum
 import de.luca.dungeonmastermanager.database.Entity
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.awt.KeyEventDispatcher
 import java.awt.KeyboardFocusManager
 import java.awt.event.KeyEvent
+import androidx.compose.foundation.Image
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import de.luca.dungeon_master_manager.data.ProjectRepository
+import de.luca.dungeon_master_manager.ui.components.rememberEntityImage
+import de.luca.dungeon_master_manager.ui.components.ImagePickerDialog
+import java.io.File
 
 @Composable
 fun MarkdownEditor(
@@ -84,6 +95,8 @@ fun MarkdownEditor(
     onContentChange: (String) -> Unit,
     modifier: Modifier = Modifier,
     onOpenEntityPopout: (String) -> Unit = {},
+    onOpenImageInTab: (String) -> Unit = {},
+    projectPath: String = "",
     entities: List<Entity> = emptyList()
 ) {
     val settings by AppSettingsRepository.settings.collectAsState()
@@ -101,6 +114,21 @@ fun MarkdownEditor(
             val end = textFieldValue.selection.end.coerceIn(0, content.length)
             textFieldValue = TextFieldValue(text = content, selection = TextRange(start, end))
         }
+    }
+
+    var showImagePickerDialog by remember { mutableStateOf(false) }
+    var imageDialogInitialTitle by remember { mutableStateOf("") }
+    var isImageDialogTriggeredByTyping by remember { mutableStateOf(false) }
+    var typingTriggerRange by remember { mutableStateOf<TextRange?>(null) }
+    var dismissedTypingTriggerPos by remember { mutableStateOf<Int?>(null) }
+
+    fun openImagePickerFromToolbar() {
+        val sel = textFieldValue.selection
+        val selectedText = if (sel.collapsed) "" else textFieldValue.text.substring(sel.min, sel.max).trim()
+        imageDialogInitialTitle = selectedText
+        isImageDialogTriggeredByTyping = false
+        typingTriggerRange = null
+        showImagePickerDialog = true
     }
 
     fun applyFormat(formatSyntax: String) {
@@ -273,6 +301,17 @@ fun MarkdownEditor(
             }
 
             OutlinedButton(
+                onClick = { openImagePickerFromToolbar() },
+                border = BorderStroke(1.dp, GrimoireColors.BorderBronze),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = GrimoireColors.GoldPrimary),
+                shape = RoundedCornerShape(4.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                modifier = Modifier.padding(end = 8.dp).defaultMinSize(minHeight = 30.dp)
+            ) {
+                Text("🖼 Image", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+            }
+
+            OutlinedButton(
                 onClick = { applyFormat("**") },
                 border = BorderStroke(1.dp, GrimoireColors.BorderBronze),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = GrimoireColors.ParchmentLight),
@@ -341,6 +380,9 @@ fun MarkdownEditor(
                     }
                 },
                 onOpenEntityPopout = onOpenEntityPopout,
+                onOpenImageInTab = onOpenImageInTab,
+                onOpenImagePicker = { openImagePickerFromToolbar() },
+                projectPath = projectPath,
                 focusRequester = focusRequester,
                 onValueChange = { newValue ->
                     val updatedSelection = expandMarkdownTokenSelection(newValue.text, newValue.selection)
@@ -350,8 +392,60 @@ fun MarkdownEditor(
                     if (finalValue.text != content) {
                         onContentChange(finalValue.text)
                     }
+
+                    if (dismissedTypingTriggerPos != null && finalValue.selection.start != dismissedTypingTriggerPos) {
+                        dismissedTypingTriggerPos = null
+                    }
+
+                    val cursor = finalValue.selection.start
+                    if (finalValue.selection.collapsed && cursor >= 2) {
+                        val textBefore = finalValue.text.substring(0, cursor)
+                        if (textBefore.endsWith("![") && dismissedTypingTriggerPos != cursor) {
+                            val isAlreadyCompleteLink = IMAGE_LINK_REGEX.findAll(finalValue.text).any { cursor in it.range }
+                            if (!isAlreadyCompleteLink) {
+                                isImageDialogTriggeredByTyping = true
+                                typingTriggerRange = TextRange(cursor - 2, cursor)
+                                imageDialogInitialTitle = ""
+                                showImagePickerDialog = true
+                            }
+                        }
+                    }
                 },
                 onFormat = { applyFormat(it) }
+            )
+        }
+
+        if (showImagePickerDialog) {
+            ImagePickerDialog(
+                projectPath = projectPath,
+                initialTitle = imageDialogInitialTitle,
+                onDismiss = {
+                    showImagePickerDialog = false
+                    dismissedTypingTriggerPos = textFieldValue.selection.start
+                    try { focusRequester.requestFocus() } catch (_: Exception) {}
+                },
+                onInsert = { title, relPath ->
+                    val text = textFieldValue.text
+                    val insertion = "![$title]($relPath)"
+                    val (newContent, newCursor) = if (isImageDialogTriggeredByTyping && typingTriggerRange != null) {
+                        val range = typingTriggerRange!!
+                        val before = text.substring(0, range.min.coerceIn(0, text.length))
+                        val after = text.substring(range.max.coerceIn(0, text.length))
+                        "$before$insertion$after" to (before.length + insertion.length)
+                    } else {
+                        val sel = textFieldValue.selection
+                        val before = text.substring(0, sel.min.coerceIn(0, text.length))
+                        val after = text.substring(sel.max.coerceIn(0, text.length))
+                        "$before$insertion$after" to (before.length + insertion.length)
+                    }
+                    showImagePickerDialog = false
+                    isImageDialogTriggeredByTyping = false
+                    typingTriggerRange = null
+                    dismissedTypingTriggerPos = null
+                    textFieldValue = TextFieldValue(newContent, TextRange(newCursor))
+                    onContentChange(newContent)
+                    try { focusRequester.requestFocus() } catch (_: Exception) {}
+                }
             )
         }
     }
@@ -367,6 +461,9 @@ private fun MarkdownEdit(
     onValueChange: (TextFieldValue) -> Unit,
     onFormat: (String) -> Unit,
     onOpenEntityPopout: (String) -> Unit,
+    onOpenImageInTab: (String) -> Unit,
+    onOpenImagePicker: () -> Unit = {},
+    projectPath: String,
     focusRequester: FocusRequester
 ) {
     val primaryColor = GrimoireColors.GoldPrimary
@@ -485,6 +582,7 @@ private fun MarkdownEdit(
         }
     }
 
+    val coroutineScope = rememberCoroutineScope()
     var lastMousePosition by remember { mutableStateOf<Offset?>(null) }
     var isCtrlDown by remember { mutableStateOf(false) }
 
@@ -510,18 +608,51 @@ private fun MarkdownEdit(
     }
     val isHoveringEntityLink = hoveredEntity != null
 
+    val currentImageHit = remember(lastMousePosition, textLayoutResult, textFieldValue.text, currentOffsetMapping, projectPath) {
+        if (lastMousePosition == null) null
+        else findImageLinkAtPosition(lastMousePosition!!, textLayoutResult, currentOffsetMapping, textFieldValue.text, projectPath)
+    }
+    val isHoveringImageLink = currentImageHit != null
+
+    var hoveredImageLink by remember { mutableStateOf<ImageLinkHit?>(null) }
+    var popupPosition by remember { mutableStateOf<Offset?>(null) }
+    var isMouseOverPopup by remember { mutableStateOf(false) }
+    var dismissJob by remember { mutableStateOf<Job?>(null) }
+
+    LaunchedEffect(currentImageHit, isMouseOverPopup) {
+        if (currentImageHit != null) {
+            dismissJob?.cancel()
+            val oldPath = hoveredImageLink?.relativePath
+            hoveredImageLink = currentImageHit
+            if (popupPosition == null || oldPath != currentImageHit.relativePath) {
+                popupPosition = lastMousePosition
+            }
+        } else if (!isMouseOverPopup) {
+            dismissJob?.cancel()
+            dismissJob = launch {
+                delay(250)
+                if (!isMouseOverPopup) {
+                    hoveredImageLink = null
+                    popupPosition = null
+                }
+            }
+        }
+    }
+
+    val shouldShowHandCursor = isHoveringEntityLink || (isHoveringImageLink && isCtrlDown)
+
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .tiledTexture(Res.drawable.grimoire_vellum, alpha = 0.08f)
             .pointerHoverIcon(
-                icon = if (isHoveringEntityLink) PointerIcon.Hand else PointerIcon.Default,
-                overrideDescendants = isHoveringEntityLink
+                icon = if (shouldShowHandCursor) PointerIcon.Hand else PointerIcon.Default,
+                overrideDescendants = shouldShowHandCursor
             )
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
-                enabled = !isHoveringEntityLink
+                enabled = !shouldShowHandCursor
             ) {
                 focusRequester.requestFocus()
             }
@@ -561,6 +692,19 @@ private fun MarkdownEdit(
                         if (clickedEntity != null) {
                             onOpenEntityPopout(clickedEntity.name)
                             event.changes.forEach { it.consume() }
+                            return@onPointerEvent
+                        }
+                        val clickedImg = findImageLinkAtPosition(
+                            pos = clickPos,
+                            layout = layout,
+                            offsetMapping = currentOffsetMapping,
+                            text = textFieldValue.text,
+                            projectPath = projectPath
+                        )
+                        if (clickedImg != null) {
+                            onOpenImageInTab(clickedImg.relativePath)
+                            event.changes.forEach { it.consume() }
+                            return@onPointerEvent
                         }
                     }
                 } else {
@@ -583,6 +727,19 @@ private fun MarkdownEdit(
                         )
                         if (clickedEntity != null) {
                             event.changes.forEach { it.consume() }
+                            return@onPointerEvent
+                        }
+                        val clickedImg = findImageLinkAtPosition(
+                            pos = clickPos,
+                            layout = layout,
+                            offsetMapping = currentOffsetMapping,
+                            text = textFieldValue.text,
+                            projectPath = projectPath
+                        )
+                        if (clickedImg != null) {
+                            onOpenImageInTab(clickedImg.relativePath)
+                            event.changes.forEach { it.consume() }
+                            return@onPointerEvent
                         }
                     }
                 }
@@ -593,7 +750,8 @@ private fun MarkdownEdit(
                 val items = mutableListOf(
                     ContextMenuItem("Bold") { onFormat("**") },
                     ContextMenuItem("Italic") { onFormat("*") },
-                    ContextMenuItem("Underline") { onFormat("__") }
+                    ContextMenuItem("Underline") { onFormat("__") },
+                    ContextMenuItem("Insert Image...") { onOpenImagePicker() }
                 )
                 
                 val text = textFieldValue.text
@@ -630,7 +788,7 @@ private fun MarkdownEdit(
             BasicTextField(
                 value = textFieldValue,
                 onValueChange = { newValue ->
-                    if (isHoveringEntityLink && newValue.text == textFieldValue.text) {
+                    if (shouldShowHandCursor && newValue.text == textFieldValue.text) {
                         return@BasicTextField
                     }
                     onValueChange(newValue)
@@ -827,6 +985,130 @@ private fun MarkdownEdit(
                 }
             }
         }
+
+        val activeHover = hoveredImageLink
+        if (activeHover != null && popupPosition != null) {
+            val density = LocalDensity.current
+            val maxContainerWidthPx = with(density) { maxWidth.toPx() }
+            val maxContainerHeightPx = with(density) { maxHeight.toPx() }
+            val popupWidthPx = with(density) { 260.dp.toPx() }
+
+            val anchorX = popupPosition!!.x
+            val anchorY = popupPosition!!.y
+            val popupX = if (anchorX + 16f + popupWidthPx <= maxContainerWidthPx) {
+                anchorX + 16f
+            } else {
+                (anchorX - popupWidthPx - 16f).coerceAtLeast(0f)
+            }
+            val popupY = if (anchorY + 16f + 250f <= maxContainerHeightPx) {
+                anchorY + 16f
+            } else {
+                (anchorY - 260f).coerceAtLeast(0f)
+            }
+
+            Surface(
+                modifier = Modifier
+                    .offset { IntOffset(popupX.roundToInt(), popupY.roundToInt()) }
+                    .width(260.dp)
+                    .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(8.dp))
+                    .onPointerEvent(PointerEventType.Enter) {
+                        isMouseOverPopup = true
+                        dismissJob?.cancel()
+                    }
+                    .onPointerEvent(PointerEventType.Exit) {
+                        isMouseOverPopup = false
+                    }
+                    .clickable {
+                        onOpenImageInTab(activeHover.relativePath)
+                    },
+                color = GrimoireColors.SurfaceCard,
+                shadowElevation = 12.dp,
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    val file = activeHover.resolvedFile
+                    val fileExists = file != null && file.exists() && file.isFile
+
+                    if (fileExists) {
+                        val bitmap = rememberEntityImage(file)
+                        if (bitmap != null) {
+                            Image(
+                                bitmap = bitmap,
+                                contentDescription = activeHover.title,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 180.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .border(0.5.dp, GrimoireColors.BorderBronze.copy(alpha = 0.5f), RoundedCornerShape(6.dp)),
+                                contentScale = ContentScale.Fit
+                            )
+                            Spacer(Modifier.height(8.dp))
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(100.dp)
+                                    .background(GrimoireColors.Surface, RoundedCornerShape(6.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "Laden...",
+                                    color = GrimoireColors.ParchmentMuted,
+                                    fontSize = 11.sp
+                                )
+                            }
+                            Spacer(Modifier.height(8.dp))
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(80.dp)
+                                .background(GrimoireColors.Surface, RoundedCornerShape(6.dp))
+                                .border(1.dp, GrimoireColors.CrimsonError.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+                                .padding(8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                "Bilddatei nicht gefunden:\n${activeHover.relativePath}",
+                                color = GrimoireColors.CrimsonError,
+                                fontSize = 11.sp,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                    }
+
+                    Text(
+                        text = activeHover.title,
+                        color = GrimoireColors.GoldPrimary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        text = activeHover.relativePath,
+                        color = GrimoireColors.ParchmentMuted,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "Klicken oder Strg+Klick zum Öffnen",
+                        color = GrimoireColors.GoldPrimary.copy(alpha = 0.7f),
+                        fontSize = 9.sp,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -900,6 +1182,105 @@ internal fun findEntityAtPosition(
     text: String,
     entities: List<Entity>
 ): Entity? = findEntityAtPosition(pos, layout?.asEntityHoverTextLayout(), offsetMapping, text, entities)
+
+internal val IMAGE_LINK_REGEX = Regex(
+    "(?<!\\\\)(!?)\\[([^\\]\\n]+)\\]\\(([^)\\n]+\\.(?:png|jpg|jpeg|webp|svg|bmp|gif|ico))\\)",
+    RegexOption.IGNORE_CASE
+)
+
+internal data class ImageLinkHit(
+    val title: String,
+    val relativePath: String,
+    val resolvedFile: File?,
+    val linkRect: Rect
+)
+
+internal fun resolveImageFile(relativePath: String, projectPath: String): File? {
+    if (relativePath.isBlank()) return null
+    val norm = relativePath.trim().replace('\\', File.separatorChar).replace('/', File.separatorChar)
+    val asFile = File(norm)
+    if (asFile.isAbsolute && asFile.exists() && asFile.isFile) return asFile
+
+    if (projectPath.isNotBlank()) {
+        val inProject = File(projectPath, norm)
+        if (inProject.exists() && inProject.isFile) return inProject
+    }
+
+    val inGlobalImages = File(ProjectRepository.globalImagesDir, norm)
+    if (inGlobalImages.exists() && inGlobalImages.isFile) return inGlobalImages
+
+    val inGlobal = File(ProjectRepository.globalDir, norm)
+    if (inGlobal.exists() && inGlobal.isFile) return inGlobal
+
+    return if (projectPath.isNotBlank()) File(projectPath, norm) else null
+}
+
+internal fun findImageLinkAtPosition(
+    pos: Offset,
+    layout: EntityHoverTextLayout?,
+    offsetMapping: OffsetMapping,
+    text: String,
+    projectPath: String
+): ImageLinkHit? {
+    if (layout == null || layout.textLength == 0) return null
+
+    for (match in IMAGE_LINK_REGEX.findAll(text)) {
+        val title = match.groups[2]?.value ?: continue
+        val relativePath = match.groups[3]?.value ?: continue
+
+        val transStart = offsetMapping.originalToTransformed(match.range.first)
+            .coerceIn(0, layout.textLength)
+        if (transStart >= layout.textLength) continue
+
+        var transEnd = transStart
+        while (transEnd < layout.textLength && offsetMapping.transformedToOriginal(transEnd) in match.range) {
+            transEnd++
+        }
+
+        if (transEnd <= transStart) continue
+
+        val firstCharBox = layout.getBoundingBox(transStart)
+        val lastCharBox = layout.getBoundingBox(transEnd - 1)
+
+        val isSingleLine = kotlin.math.abs(firstCharBox.top - lastCharBox.top) < 2f
+        val linkRect = if (isSingleLine) {
+            Rect(
+                left = minOf(firstCharBox.left, lastCharBox.left) - 2f,
+                top = minOf(firstCharBox.top, lastCharBox.top) - 2f,
+                right = maxOf(firstCharBox.right, lastCharBox.right) + 2f,
+                bottom = maxOf(firstCharBox.bottom, lastCharBox.bottom) + 2f
+            )
+        } else {
+            Rect(
+                left = minOf(firstCharBox.left, lastCharBox.left) - 2f,
+                top = minOf(firstCharBox.top, lastCharBox.top) - 2f,
+                right = maxOf(firstCharBox.right, lastCharBox.right) + 2f,
+                bottom = maxOf(firstCharBox.bottom, lastCharBox.bottom) + 2f
+            )
+        }
+
+        val hit = if (isSingleLine) {
+            linkRect.contains(pos)
+        } else {
+            (transStart until transEnd).any { layout.getBoundingBox(it).inflate(2f).contains(pos) }
+        }
+
+        if (hit) {
+            val resolvedFile = resolveImageFile(relativePath, projectPath)
+            return ImageLinkHit(title, relativePath, resolvedFile, linkRect)
+        }
+    }
+
+    return null
+}
+
+internal fun findImageLinkAtPosition(
+    pos: Offset,
+    layout: TextLayoutResult?,
+    offsetMapping: OffsetMapping,
+    text: String,
+    projectPath: String
+): ImageLinkHit? = findImageLinkAtPosition(pos, layout?.asEntityHoverTextLayout(), offsetMapping, text, projectPath)
 
 internal fun replaceEntityQueryWithLink(
     text: String,
@@ -1138,8 +1519,8 @@ internal fun parseMarkdown(
     }
 
     val regex = Regex(
-        "\\*\\*(.*?)\\*\\*|(?<!\\*)\\*(?!\\*)(.*?)(?<!\\*)\\*(?!\\*)|__(.*?)__|(?<!\\\\)@\\[(.*?)\\]|^(#{1,6}) (.*)$",
-        RegexOption.MULTILINE
+        "\\*\\*(.*?)\\*\\*|(?<!\\*)\\*(?!\\*)(.*?)(?<!\\*)\\*(?!\\*)|__(.*?)__|(?<!\\\\)@\\[(.*?)\\]|^(#{1,6}) (.*)$|(?<!\\\\)(!?)\\[([^\\]\\n]+)\\]\\(([^)\\n]+\\.(?:png|jpg|jpeg|webp|svg|bmp|gif|ico))\\)",
+        setOf(RegexOption.MULTILINE, RegexOption.IGNORE_CASE)
     )
     
     val matches = regex.findAll(text)
@@ -1364,6 +1745,55 @@ internal fun parseMarkdown(
                     transStart,
                     builder.length
                 )
+            }
+        } else if (match.groups[8] != null && match.groups[9] != null) {
+            val title = match.groups[8]!!.value
+            val path = match.groups[9]!!.value
+            val isCursorIn = isEntityExpanded(match.range, cursorSelection)
+            val displayText = "🖼 " + title
+
+            if (!isCursorIn) {
+                val transStart = builder.length
+
+                for (i in match.range) {
+                    origToTrans.add(transStart)
+                }
+
+                for (i in displayText.indices) {
+                    val mappedOrig = if (i == 0) match.range.first else match.range.first + 1
+                    builder.append(displayText[i])
+                    transToOrig.add(mappedOrig)
+                }
+
+                builder.addStyle(
+                    SpanStyle(
+                        color = primaryColor,
+                        fontWeight = FontWeight.Bold,
+                        textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
+                    ),
+                    transStart,
+                    builder.length
+                )
+                builder.addStringAnnotation("image_link", path, transStart, builder.length)
+                builder.addStringAnnotation("image_title", title, transStart, builder.length)
+            } else {
+                val transStart = builder.length
+                for (i in match.range) {
+                    origToTrans.add(builder.length)
+                    builder.append(text[i])
+                    transToOrig.add(i)
+                }
+                builder.addStyle(
+                    SpanStyle(
+                        color = primaryColor,
+                        fontWeight = FontWeight.Bold,
+                        textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
+                    ),
+                    transStart,
+                    builder.length
+                )
+                builder.addStringAnnotation("image_link", path, transStart, builder.length)
+                builder.addStringAnnotation("image_title", title, transStart, builder.length)
             }
         }
     }

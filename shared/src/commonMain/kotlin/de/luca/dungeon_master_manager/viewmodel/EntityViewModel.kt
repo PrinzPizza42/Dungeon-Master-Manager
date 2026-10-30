@@ -58,11 +58,11 @@ class EntityViewModel(private val projectPath: String?, private val viewModel: P
         }
     }
 
-    fun addEntity(isGlobal: Boolean, name: String, type: String, color: String?, notesFilePath: String?) {
+    fun addEntity(isGlobal: Boolean, name: String, type: String, color: String?, notesFilePath: String?, imageFilePath: String? = null) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val db = if (isGlobal) DatabaseHelper.globalDatabase else DatabaseHelper.getProjectDatabase(projectPath!!)
-                db.entityQueries.insertEntity(UUID.randomUUID().toString(), name, type, color, notesFilePath)
+                db.entityQueries.insertEntity(UUID.randomUUID().toString(), name, type, color, notesFilePath, imageFilePath)
                 println("Entity inserted successfully: $name")
             } catch (e: Exception) {
                 System.err.println("Failed to insert entity: ${e.message}")
@@ -72,10 +72,10 @@ class EntityViewModel(private val projectPath: String?, private val viewModel: P
         }
     }
 
-    fun updateEntity(isGlobal: Boolean, id: String, name: String, type: String, color: String?, notesFilePath: String?) {
+    fun updateEntity(isGlobal: Boolean, id: String, name: String, type: String, color: String?, notesFilePath: String?, imageFilePath: String? = null) {
         viewModelScope.launch(Dispatchers.IO) {
             val db = if (isGlobal) DatabaseHelper.globalDatabase else DatabaseHelper.getProjectDatabase(projectPath!!)
-            db.entityQueries.updateEntity(name, type, color, notesFilePath, id)
+            db.entityQueries.updateEntity(name, type, color, notesFilePath, imageFilePath, id)
             viewModel?.loadEntityColors()
         }
     }
@@ -139,6 +139,17 @@ class EntityViewModel(private val projectPath: String?, private val viewModel: P
         return candidate
     }
 
+    fun resolveEntityImageFile(imagePath: String?, isGlobal: Boolean): File? {
+        if (imagePath.isNullOrBlank()) return null
+        val baseDir = if (isGlobal) {
+            ProjectRepository.globalImagesDir
+        } else {
+            if (projectPath.isNullOrBlank()) null else File(projectPath)
+        } ?: return null
+        val file = File(baseDir, imagePath)
+        return if (file.exists() && file.isFile) file else null
+    }
+
     fun copyEntity(entity: Entity, toGlobal: Boolean) {
         viewModelScope.launch(Dispatchers.IO) {
             var targetNotesPath = entity.notesFilePath
@@ -172,8 +183,31 @@ class EntityViewModel(private val projectPath: String?, private val viewModel: P
                 }
             }
 
+            var targetImagePath = entity.imageFilePath
+            if (!entity.imageFilePath.isNullOrBlank()) {
+                val sourceFile = resolveEntityImageFile(entity.imageFilePath, isGlobal = !toGlobal)
+                if (sourceFile != null && sourceFile.exists()) {
+                    val targetDir = if (toGlobal) {
+                        ProjectRepository.globalImagesDir.also { it.mkdirs() }
+                    } else {
+                        if (projectPath != null) File(projectPath, "Images${File.separator}Entities").also { it.mkdirs() } else null
+                    }
+                    if (targetDir != null) {
+                        val baseName = sourceFile.nameWithoutExtension
+                        val ext = sourceFile.extension.ifBlank { "png" }
+                        val targetFile = resolveNonConflictingFile(targetDir, baseName, ext)
+                        sourceFile.copyTo(targetFile, overwrite = false)
+                        targetImagePath = if (toGlobal) {
+                            targetFile.name
+                        } else {
+                            "Images${File.separator}Entities${File.separator}${targetFile.name}"
+                        }
+                    }
+                }
+            }
+
             val destDb = if (toGlobal) DatabaseHelper.globalDatabase else DatabaseHelper.getProjectDatabase(projectPath!!)
-            destDb.entityQueries.insertEntity(UUID.randomUUID().toString(), entity.name, entity.type, entity.color, targetNotesPath)
+            destDb.entityQueries.insertEntity(UUID.randomUUID().toString(), entity.name, entity.type, entity.color, targetNotesPath, targetImagePath)
 
             if (!toGlobal) {
                 viewModel?.loadFileTree()
@@ -203,6 +237,32 @@ class EntityViewModel(private val projectPath: String?, private val viewModel: P
         }
 
         return "$pluralType${File.separator}${targetFile.name}"
+    }
+
+    fun importEntityImage(sourceFile: File, isGlobal: Boolean, entityName: String): String {
+        val targetDir = if (isGlobal) {
+            ProjectRepository.globalImagesDir.also { it.mkdirs() }
+        } else {
+            if (projectPath != null) {
+                File(projectPath, "Images${File.separator}Entities").also { it.mkdirs() }
+            } else return ""
+        }
+
+        val safeName = entityName.replace(Regex("[^a-zA-Z0-9.-]"), "_").ifBlank { "entity_image" }
+        val ext = sourceFile.extension.ifBlank { "png" }
+        val targetFile = resolveNonConflictingFile(targetDir, safeName, ext)
+
+        sourceFile.copyTo(targetFile, overwrite = false)
+
+        if (!isGlobal) {
+            viewModel?.loadFileTree()
+        }
+
+        return if (isGlobal) {
+            targetFile.name
+        } else {
+            "Images${File.separator}Entities${File.separator}${targetFile.name}"
+        }
     }
 
     fun getAvailableMdFiles(isGlobal: Boolean, entityType: String): List<String> {

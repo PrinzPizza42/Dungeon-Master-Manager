@@ -17,7 +17,8 @@ fun main() = runBlocking {
         name = "Global Test User",
         type = "NPC",
         color = "4294901760",
-        notesFilePath = ""
+        notesFilePath = "",
+        imageFilePath = null
     )
     
     delay(1000)

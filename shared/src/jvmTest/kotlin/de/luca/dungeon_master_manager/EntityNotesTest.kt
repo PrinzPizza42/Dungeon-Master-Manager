@@ -84,4 +84,43 @@ class EntityNotesTest {
         assertTrue(placeFiles.isNotEmpty())
         assertEquals("Places${File.separator}Tavern.md", placeFiles.first())
     }
+
+    @Test
+    fun testImportEntityImageAndConflictResolution() {
+        val vm = EntityViewModel(tempDir.absolutePath, null)
+
+        val externalImage = File(mockGlobalDir, "portrait.png")
+        externalImage.writeBytes(byteArrayOf(1, 2, 3, 4))
+
+        val importedPath1 = vm.importEntityImage(externalImage, isGlobal = false, entityName = "Hero Knight")
+        assertEquals("Images${File.separator}Entities${File.separator}Hero_Knight.png", importedPath1)
+
+        val file1 = File(tempDir, importedPath1)
+        assertTrue(file1.exists())
+        assertEquals(4, file1.length())
+
+        // Import again with same entity name -> should not overwrite, should resolve to Hero_Knight_1.png
+        val importedPath2 = vm.importEntityImage(externalImage, isGlobal = false, entityName = "Hero Knight")
+        assertEquals("Images${File.separator}Entities${File.separator}Hero_Knight_1.png", importedPath2)
+
+        val file2 = File(tempDir, importedPath2)
+        assertTrue(file2.exists())
+        assertNotEquals(file1.absolutePath, file2.absolutePath)
+    }
+
+    @Test
+    fun testResolveEntityImageFile() {
+        val vm = EntityViewModel(tempDir.absolutePath, null)
+
+        val imagesDir = File(tempDir, "Images/Entities").also { it.mkdirs() }
+        val testFile = File(imagesDir, "sample.png").also { it.writeText("fake image") }
+
+        val resolved = vm.resolveEntityImageFile("Images/Entities/sample.png", isGlobal = false)
+        assertNotNull(resolved)
+        assertTrue(resolved.exists())
+        assertEquals(testFile.absolutePath, resolved.absolutePath)
+
+        val missing = vm.resolveEntityImageFile("Images/Entities/nonexistent.png", isGlobal = false)
+        assertNull(missing)
+    }
 }
