@@ -84,7 +84,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.shape.CircleShape
 import de.luca.dungeon_master_manager.data.ProjectRepository
+import de.luca.dungeon_master_manager.ui.components.EntityImageLoader
 import de.luca.dungeon_master_manager.ui.components.rememberEntityImage
 import de.luca.dungeon_master_manager.ui.components.ImagePickerDialog
 import java.io.File
@@ -560,7 +562,7 @@ private fun MarkdownEdit(
             } else {
                 lastInsideEntityRange = null
                 val textBeforeCursor = text.substring(0, cursor)
-                val match = Regex(".*@([\\w\\s]*)$").find(textBeforeCursor)
+                val match = Regex(".*@([^\\r\\n\\[\\]@]*)$").find(textBeforeCursor)
                 if (match != null) {
                     val newQuery = match.groups[1]?.value ?: ""
                     if (newQuery != dropdownQuery) {
@@ -599,14 +601,11 @@ private fun MarkdownEdit(
         }
     }
 
-    val hoveredEntity = remember(lastMousePosition, isCtrlDown, textLayoutResult, textFieldValue.text, currentOffsetMapping, entities) {
-        if (!isCtrlDown || lastMousePosition == null) {
-            null
-        } else {
-            findEntityAtPosition(lastMousePosition!!, textLayoutResult, currentOffsetMapping, textFieldValue.text, entities)
-        }
+    val currentEntityHit = remember(lastMousePosition, textLayoutResult, textFieldValue.text, currentOffsetMapping, entities) {
+        if (lastMousePosition == null) null
+        else findEntityAtPosition(lastMousePosition!!, textLayoutResult, currentOffsetMapping, textFieldValue.text, entities)
     }
-    val isHoveringEntityLink = hoveredEntity != null
+    val isHoveringEntityLink = currentEntityHit != null && isCtrlDown
 
     val currentImageHit = remember(lastMousePosition, textLayoutResult, textFieldValue.text, currentOffsetMapping, projectPath) {
         if (lastMousePosition == null) null
@@ -618,6 +617,10 @@ private fun MarkdownEdit(
     var popupPosition by remember { mutableStateOf<Offset?>(null) }
     var isMouseOverPopup by remember { mutableStateOf(false) }
     var dismissJob by remember { mutableStateOf<Job?>(null) }
+
+    var displayedHoverEntity by remember { mutableStateOf<Entity?>(null) }
+    var entityPopupPosition by remember { mutableStateOf<Offset?>(null) }
+    var entityDismissJob by remember { mutableStateOf<Job?>(null) }
 
     LaunchedEffect(currentImageHit, isMouseOverPopup) {
         if (currentImageHit != null) {
@@ -635,6 +638,29 @@ private fun MarkdownEdit(
                     hoveredImageLink = null
                     popupPosition = null
                 }
+            }
+        }
+    }
+
+    LaunchedEffect(currentEntityHit) {
+        if (currentEntityHit != null) {
+            entityDismissJob?.cancel()
+            if (displayedHoverEntity?.id == currentEntityHit.id) {
+                // Keep displaying same entity
+            } else {
+                val targetPos = lastMousePosition
+                entityDismissJob = launch {
+                    delay(350)
+                    displayedHoverEntity = currentEntityHit
+                    entityPopupPosition = targetPos
+                }
+            }
+        } else {
+            entityDismissJob?.cancel()
+            entityDismissJob = launch {
+                delay(200)
+                displayedHoverEntity = null
+                entityPopupPosition = null
             }
         }
     }
@@ -915,11 +941,19 @@ private fun MarkdownEdit(
         if (isDropdownActive) {
             val density = LocalDensity.current
             val maxContainerWidthPx = with(density) { maxWidth.toPx() }
-            val menuWidthPx = with(density) { 260.dp.toPx() }
+            val menuWidthPx = with(density) { 320.dp.toPx() }
 
             val cursor = textFieldValue.selection.start.coerceIn(0, textFieldValue.text.length)
             val transCursor = currentOffsetMapping.originalToTransformed(cursor).coerceIn(0, annotatedText.length)
-            val cursorRect = textLayoutResult?.getCursorRect(transCursor)
+            val cursorRect = textLayoutResult?.let { layout ->
+                val maxLen = layout.layoutInput.text.length
+                val safeTrans = transCursor.coerceIn(0, maxLen)
+                try {
+                    layout.getCursorRect(safeTrans)
+                } catch (_: Exception) {
+                    null
+                }
+            }
 
             val popupX = if (cursorRect != null) {
                 cursorRect.left.coerceIn(0f, (maxContainerWidthPx - menuWidthPx).coerceAtLeast(0f))
@@ -935,16 +969,22 @@ private fun MarkdownEdit(
             Surface(
                 modifier = Modifier
                     .offset { IntOffset(popupX.roundToInt(), popupY.roundToInt()) }
-                    .width(260.dp)
-                    .heightIn(max = 220.dp)
+                    .width(320.dp)
+                    .heightIn(max = 260.dp)
                     .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(6.dp)),
                 color = GrimoireColors.SurfaceCard,
                 shadowElevation = 8.dp,
                 shape = RoundedCornerShape(6.dp)
             ) {
                 LazyColumn(state = dropdownListState) {
-                    itemsIndexed(displayEntities) { index, ent ->
+                    itemsIndexed(displayEntities, key = { _, ent -> ent.id }) { index, ent ->
                         val isSelected = index == clampedSelectedIndex
+                        val entColor = try { Color(ent.color?.toULong() ?: 0xFFFFFFFFuL) } catch (_: Exception) { GrimoireColors.GoldPrimary }
+                        val imageFile = remember(ent.imageFilePath, projectPath) {
+                            EntityImageLoader.resolveEntityImageFile(ent, projectPath)
+                        }
+                        val imageBitmap = rememberEntityImage(imageFile)
+
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -963,23 +1003,68 @@ private fun MarkdownEdit(
                                     dropdownDismissed = false
                                     onValueChange(TextFieldValue(newContent, newSel))
                                 }
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            val c = try { Color(ent.color?.toULong() ?: 0xFFFFFFFFuL) } catch(e: Exception) { GrimoireColors.GoldPrimary }
-                            Box(modifier = Modifier.size(10.dp).background(c, RoundedCornerShape(2.dp)))
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                ent.name,
-                                fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Bold,
-                                color = if (isSelected) GrimoireColors.GoldPrimary else GrimoireColors.ParchmentLight
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                "(${ent.type})",
-                                color = if (isSelected) GrimoireColors.ParchmentLight else GrimoireColors.ParchmentMuted,
-                                fontSize = 12.sp
-                            )
+                            if (imageBitmap != null) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .border(1.5.dp, entColor, RoundedCornerShape(6.dp))
+                                        .background(GrimoireColors.SurfaceLow, RoundedCornerShape(6.dp))
+                                ) {
+                                    Image(
+                                        bitmap = imageBitmap,
+                                        contentDescription = ent.name,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(entColor.copy(alpha = 0.22f))
+                                        .border(1.5.dp, entColor.copy(alpha = 0.85f), RoundedCornerShape(6.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = ent.name.trim().take(1).uppercase().ifBlank { "?" },
+                                        color = entColor,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 15.sp
+                                    )
+                                }
+                            }
+
+                            Spacer(Modifier.width(10.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = ent.name,
+                                    fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Bold,
+                                    color = if (isSelected) GrimoireColors.GoldPrimary else GrimoireColors.ParchmentLight,
+                                    fontSize = 13.5.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                val details = buildString {
+                                    append(ent.type)
+                                    if (!ent.notesFilePath.isNullOrBlank()) {
+                                        append(" • ")
+                                        append(File(ent.notesFilePath).name)
+                                    }
+                                }
+                                Text(
+                                    text = details,
+                                    color = if (isSelected) GrimoireColors.ParchmentLight.copy(alpha = 0.8f) else GrimoireColors.ParchmentMuted,
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     }
                 }
@@ -1104,6 +1189,190 @@ private fun MarkdownEdit(
                         text = "Klicken oder Strg+Klick zum Öffnen",
                         color = GrimoireColors.GoldPrimary.copy(alpha = 0.7f),
                         fontSize = 9.sp,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
+
+        val activeEntityHover = displayedHoverEntity
+        if (activeEntityHover != null && entityPopupPosition != null && hoveredImageLink == null) {
+            val ent = activeEntityHover
+            val entColor = remember(ent.color) {
+                try { Color(ent.color?.toULong() ?: 0xFFFFFFFFuL) } catch (_: Exception) { GrimoireColors.GoldPrimary }
+            }
+            val imageFile = remember(ent.imageFilePath, projectPath) {
+                EntityImageLoader.resolveEntityImageFile(ent, projectPath)
+            }
+            val imageBitmap = rememberEntityImage(imageFile)
+
+            val density = LocalDensity.current
+            val maxContainerWidthPx = with(density) { maxWidth.toPx() }
+            val maxContainerHeightPx = with(density) { maxHeight.toPx() }
+            val cardWidthDp = 260.dp
+            val cardWidthPx = with(density) { cardWidthDp.toPx() }
+
+            val anchorX = entityPopupPosition!!.x
+            val anchorY = entityPopupPosition!!.y
+            val popupX = if (anchorX + 16f + cardWidthPx <= maxContainerWidthPx) {
+                anchorX + 16f
+            } else {
+                (anchorX - cardWidthPx - 16f).coerceAtLeast(0f)
+            }
+            val popupY = if (anchorY + 16f + 300f <= maxContainerHeightPx) {
+                anchorY + 16f
+            } else {
+                (anchorY - 310f).coerceAtLeast(0f)
+            }
+
+            Surface(
+                modifier = Modifier
+                    .offset { IntOffset(popupX.roundToInt(), popupY.roundToInt()) }
+                    .width(cardWidthDp)
+                    .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(8.dp)),
+                color = GrimoireColors.SurfaceCard,
+                shadowElevation = 12.dp,
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    val fileExists = imageFile != null && imageFile.exists() && imageFile.isFile
+                    if (fileExists) {
+                        if (imageBitmap != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(170.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(GrimoireColors.SurfaceLow)
+                                    .border(1.5.dp, entColor, RoundedCornerShape(6.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Image(
+                                    bitmap = imageBitmap,
+                                    contentDescription = ent.name,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            }
+                            Spacer(Modifier.height(8.dp))
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(140.dp)
+                                    .background(GrimoireColors.SurfaceLow, RoundedCornerShape(6.dp))
+                                    .border(1.dp, entColor.copy(alpha = 0.5f), RoundedCornerShape(6.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "Lade Portrait...",
+                                    color = GrimoireColors.ParchmentMuted,
+                                    fontSize = 11.sp
+                                )
+                            }
+                            Spacer(Modifier.height(8.dp))
+                        }
+                    } else {
+                        // Grimoire Emblem Fallback
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(130.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(GrimoireColors.SurfaceLow)
+                                .border(1.dp, GrimoireColors.BorderBronze.copy(alpha = 0.6f), RoundedCornerShape(6.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(54.dp)
+                                        .clip(CircleShape)
+                                        .background(entColor.copy(alpha = 0.18f))
+                                        .border(2.dp, entColor, CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = ent.name.trim().take(1).uppercase().ifBlank { "?" },
+                                        style = MaterialTheme.typography.titleLarge,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = entColor
+                                    )
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    text = "Kein Portrait hinterlegt",
+                                    color = GrimoireColors.ParchmentMuted,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                    }
+
+                    // Title & Type Badge
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = ent.name,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = GrimoireColors.ParchmentLight,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .background(entColor.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+                                .border(1.dp, entColor.copy(alpha = 0.8f), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = ent.type.uppercase(),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.5.sp,
+                                color = entColor
+                            )
+                        }
+                    }
+
+                    if (!ent.notesFilePath.isNullOrBlank()) {
+                        Spacer(Modifier.height(4.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "Notizen: ${File(ent.notesFilePath).name}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = GrimoireColors.ParchmentMuted,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                    GrimoireDivider(thickness = 0.5.dp, color = GrimoireColors.BorderBronze.copy(alpha = 0.4f))
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "Strg + Klick zum Öffnen",
+                        color = GrimoireColors.GoldPrimary.copy(alpha = 0.8f),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
