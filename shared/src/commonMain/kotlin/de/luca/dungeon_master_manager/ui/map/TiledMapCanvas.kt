@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.floor
 
@@ -47,8 +48,13 @@ fun TiledMapCanvas(
     var tilesLoadedVersion by remember { mutableStateOf(0) }
     val coroutineScope = rememberCoroutineScope()
 
-    // Keep track of requested keys to avoid duplicate launches
-    val requestedKeys = remember { mutableSetOf<TileKey>() }
+    // Track in-flight tile load requests to avoid duplicate launches
+    val inFlightKeys = remember { mutableSetOf<TileKey>() }
+
+    // Re-evaluate visible tiles whenever background generation makes progress or finishes
+    LaunchedEffect(tileState.generationProgress, tileState.isGenerating) {
+        tilesLoadedVersion++
+    }
 
     Canvas(modifier = modifier.fillMaxSize()) {
         // Reference tilesLoadedVersion so Canvas redraws when a new tile arrives
@@ -68,6 +74,15 @@ fun TiledMapCanvas(
                 dstSize = IntSize(size.width.toInt().coerceAtLeast(1), size.height.toInt().coerceAtLeast(1))
             )
             return@Canvas
+        }
+
+        // For opaque maps, draw LOD0 as background base layer to guarantee zero background bleed and smooth transitions
+        if (!manifest.hasAlpha) {
+            drawImage(
+                image = lod0,
+                dstOffset = IntOffset.Zero,
+                dstSize = IntSize(size.width.toInt().coerceAtLeast(1), size.height.toInt().coerceAtLeast(1))
+            )
         }
 
         // Choose optimal pyramid level
@@ -103,10 +118,22 @@ fun TiledMapCanvas(
                 val tileW = minOf(manifest.tileSize, chosenLevel.width - c * manifest.tileSize)
                 val tileH = minOf(manifest.tileSize, chosenLevel.height - r * manifest.tileSize)
 
-                val dstLeft = (c * manifest.tileSize.toFloat() / chosenLevel.width) * mapWidthPx
-                val dstTop = (r * manifest.tileSize.toFloat() / chosenLevel.height) * mapHeightPx
-                val dstW = (tileW.toFloat() / chosenLevel.width) * mapWidthPx
-                val dstH = (tileH.toFloat() / chosenLevel.height) * mapHeightPx
+                val isLastCol = (c == chosenLevel.cols - 1)
+                val isLastRow = (r == chosenLevel.rows - 1)
+
+                val x1 = (c * manifest.tileSize.toFloat() / chosenLevel.width) * mapWidthPx
+                val x2 = ((c * manifest.tileSize + tileW).toFloat() / chosenLevel.width) * mapWidthPx
+                val y1 = (r * manifest.tileSize.toFloat() / chosenLevel.height) * mapHeightPx
+                val y2 = ((r * manifest.tileSize + tileH).toFloat() / chosenLevel.height) * mapHeightPx
+
+                val dstLeft = kotlin.math.round(x1).toInt()
+                val dstRight = kotlin.math.round(x2).toInt().coerceAtLeast(dstLeft + 1)
+                val dstTop = kotlin.math.round(y1).toInt()
+                val dstBottom = kotlin.math.round(y2).toInt().coerceAtLeast(dstTop + 1)
+
+                // 1-pixel overlap to adjacent tiles prevents subpixel rasterization gaps and edge clamping seams
+                val dstW = (dstRight - dstLeft + if (!isLastCol) 1 else 0).coerceAtLeast(1)
+                val dstH = (dstBottom - dstTop + if (!isLastRow) 1 else 0).coerceAtLeast(1)
 
                 val key = TileKey(cacheId, chosenLevel.level, r, c)
                 val tileBmp = MapTileCacheManager.memoryCache[key]
@@ -114,30 +141,53 @@ fun TiledMapCanvas(
                 if (tileBmp != null) {
                     drawImage(
                         image = tileBmp,
-                        dstOffset = IntOffset(dstLeft.toInt(), dstTop.toInt()),
-                        dstSize = IntSize(dstW.toInt().coerceAtLeast(1), dstH.toInt().coerceAtLeast(1))
+                        dstOffset = IntOffset(dstLeft, dstTop),
+                        dstSize = IntSize(dstW, dstH)
                     )
                 } else {
-                    // Fallback to corresponding slice from lod0
-                    val srcLeft = (c * manifest.tileSize.toFloat() / chosenLevel.width) * lod0.width
-                    val srcTop = (r * manifest.tileSize.toFloat() / chosenLevel.height) * lod0.height
-                    val srcW = (tileW.toFloat() / chosenLevel.width) * lod0.width
-                    val srcH = (tileH.toFloat() / chosenLevel.height) * lod0.height
+                    // Fallback to corresponding slice from lod0 (for alpha maps, or where not already drawn)
+                    if (manifest.hasAlpha) {
+                        val srcX1 = (c * manifest.tileSize.toFloat() / chosenLevel.width) * lod0.width
+                        val srcX2 = ((c * manifest.tileSize + tileW).toFloat() / chosenLevel.width) * lod0.width
+                        val srcY1 = (r * manifest.tileSize.toFloat() / chosenLevel.height) * lod0.height
+                        val srcY2 = ((r * manifest.tileSize + tileH).toFloat() / chosenLevel.height) * lod0.height
 
-                    drawImage(
-                        image = lod0,
-                        srcOffset = IntOffset(srcLeft.toInt().coerceIn(0, lod0.width - 1), srcTop.toInt().coerceIn(0, lod0.height - 1)),
-                        srcSize = IntSize(srcW.toInt().coerceAtLeast(1), srcH.toInt().coerceAtLeast(1)),
-                        dstOffset = IntOffset(dstLeft.toInt(), dstTop.toInt()),
-                        dstSize = IntSize(dstW.toInt().coerceAtLeast(1), dstH.toInt().coerceAtLeast(1))
-                    )
+                        val srcLeft = kotlin.math.round(srcX1).toInt().coerceIn(0, lod0.width - 1)
+                        val srcRight = kotlin.math.round(srcX2).toInt().coerceIn(srcLeft + 1, lod0.width)
+                        val srcTop = kotlin.math.round(srcY1).toInt().coerceIn(0, lod0.height - 1)
+                        val srcBottom = kotlin.math.round(srcY2).toInt().coerceIn(srcTop + 1, lod0.height)
+
+                        val srcW = (srcRight - srcLeft).coerceAtLeast(1)
+                        val srcH = (srcBottom - srcTop).coerceAtLeast(1)
+
+                        drawImage(
+                            image = lod0,
+                            srcOffset = IntOffset(srcLeft, srcTop),
+                            srcSize = IntSize(srcW, srcH),
+                            dstOffset = IntOffset(dstLeft, dstTop),
+                            dstSize = IntSize(dstW, dstH)
+                        )
+                    }
 
                     // Request async load if not already in flight
-                    if (requestedKeys.add(key)) {
+                    if (inFlightKeys.add(key)) {
                         coroutineScope.launch(Dispatchers.IO) {
-                            val loaded = MapTileCacheManager.getTileBitmapAsync(cacheDir, manifest, key)
-                            if (loaded != null) {
-                                tilesLoadedVersion++
+                            try {
+                                val loaded = MapTileCacheManager.getTileBitmapAsync(cacheDir, manifest, key)
+                                if (loaded != null) {
+                                    tilesLoadedVersion++
+                                } else if (tileState.isGenerating) {
+                                    // Tile is not yet generated on disk; back off briefly before retrying
+                                    delay(350)
+                                    tilesLoadedVersion++
+                                }
+                            } catch (_: Exception) {
+                                if (tileState.isGenerating) {
+                                    delay(500)
+                                    tilesLoadedVersion++
+                                }
+                            } finally {
+                                inFlightKeys.remove(key)
                             }
                         }
                     }

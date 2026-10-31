@@ -61,7 +61,7 @@ fun ImagePickerDialog(
         GrimoireCard(
             modifier = Modifier
                 .widthIn(min = 520.dp, max = 640.dp)
-                .heightIn(min = 450.dp, max = 560.dp)
+                .heightIn(min = 450.dp, max = 600.dp)
                 .fillMaxWidth(),
             shape = RoundedCornerShape(10.dp),
             borderColor = GrimoireColors.BorderBronze,
@@ -313,7 +313,7 @@ fun ImagePickerDialog(
                         cursorColor = GrimoireColors.GoldPrimary
                     ),
                     shape = RoundedCornerShape(6.dp),
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    modifier = Modifier.fillMaxWidth().height(60.dp),
                     textStyle = TextStyle(fontSize = 13.sp)
                 )
 

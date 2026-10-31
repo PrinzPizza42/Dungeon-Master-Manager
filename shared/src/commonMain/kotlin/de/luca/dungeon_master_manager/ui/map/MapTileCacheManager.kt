@@ -23,7 +23,7 @@ data class MapTileState(
     val cacheDir: File? = null
 )
 
-class TileMemoryCache(private val maxSizeBytes: Long = 96 * 1024 * 1024) {
+class TileMemoryCache(private val maxSizeBytes: Long = 256 * 1024 * 1024) {
     private val lock = Any()
     private val map = object : LinkedHashMap<TileKey, ImageBitmap>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<TileKey, ImageBitmap>?): Boolean {
