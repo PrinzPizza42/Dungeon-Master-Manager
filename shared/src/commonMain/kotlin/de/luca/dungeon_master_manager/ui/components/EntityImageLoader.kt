@@ -35,6 +35,12 @@ object EntityImageLoader {
         return null
     }
 
+    fun getImageSync(file: File?): ImageBitmap? {
+        if (file == null || !file.exists() || !file.isFile) return null
+        val key = "${file.absolutePath}:${file.lastModified()}"
+        return cache[key]
+    }
+
     suspend fun loadImage(file: File?): ImageBitmap? = withContext(Dispatchers.IO) {
         if (file == null || !file.exists() || !file.isFile) return@withContext null
         val key = "${file.absolutePath}:${file.lastModified()}"

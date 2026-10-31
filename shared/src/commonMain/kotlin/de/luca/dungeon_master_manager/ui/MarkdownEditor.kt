@@ -1120,16 +1120,32 @@ private fun MarkdownEdit(
                     if (fileExists) {
                         val bitmap = rememberEntityImage(file)
                         if (bitmap != null) {
-                            Image(
-                                bitmap = bitmap,
-                                contentDescription = activeHover.title,
+                            val imgW = bitmap.width.toFloat()
+                            val imgH = bitmap.height.toFloat()
+                            val aspectRatio = if (imgH > 0f) imgW / imgH else 1f
+                            val maxAllowedW = 260.dp - 20.dp
+                            val targetH = 190.dp
+                            val (dispW, dispH) = if (targetH * aspectRatio <= maxAllowedW) {
+                                Pair((targetH * aspectRatio).coerceAtLeast(60.dp), targetH)
+                            } else {
+                                Pair(maxAllowedW, (maxAllowedW / aspectRatio).coerceAtLeast(60.dp))
+                            }
+
+                            Box(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(max = 180.dp)
+                                    .size(dispW, dispH)
                                     .clip(RoundedCornerShape(6.dp))
+                                    .background(GrimoireColors.SurfaceLow)
                                     .border(0.5.dp, GrimoireColors.BorderBronze.copy(alpha = 0.5f), RoundedCornerShape(6.dp)),
-                                contentScale = ContentScale.Fit
-                            )
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Image(
+                                    bitmap = bitmap,
+                                    contentDescription = activeHover.title,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Fit
+                                )
+                            }
                             Spacer(Modifier.height(8.dp))
                         } else {
                             Box(
@@ -1241,10 +1257,20 @@ private fun MarkdownEdit(
                     val fileExists = imageFile != null && imageFile.exists() && imageFile.isFile
                     if (fileExists) {
                         if (imageBitmap != null) {
+                            val imgW = imageBitmap.width.toFloat()
+                            val imgH = imageBitmap.height.toFloat()
+                            val aspectRatio = if (imgH > 0f) imgW / imgH else 1f
+                            val maxAllowedW = cardWidthDp - 20.dp
+                            val targetH = 190.dp
+                            val (dispW, dispH) = if (targetH * aspectRatio <= maxAllowedW) {
+                                Pair((targetH * aspectRatio).coerceAtLeast(60.dp), targetH)
+                            } else {
+                                Pair(maxAllowedW, (maxAllowedW / aspectRatio).coerceAtLeast(60.dp))
+                            }
+
                             Box(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(170.dp)
+                                    .size(dispW, dispH)
                                     .clip(RoundedCornerShape(6.dp))
                                     .background(GrimoireColors.SurfaceLow)
                                     .border(1.5.dp, entColor, RoundedCornerShape(6.dp)),
@@ -1254,7 +1280,7 @@ private fun MarkdownEdit(
                                     bitmap = imageBitmap,
                                     contentDescription = ent.name,
                                     modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
+                                    contentScale = ContentScale.Fit
                                 )
                             }
                             Spacer(Modifier.height(8.dp))

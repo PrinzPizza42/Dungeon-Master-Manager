@@ -4,7 +4,9 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -18,6 +20,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import de.luca.dungeon_master_manager.data.EntityPopoutRequest
 import de.luca.dungeon_master_manager.data.ProjectRepository
 import de.luca.dungeon_master_manager.ui.components.GrimoireTitleBar
@@ -154,18 +157,87 @@ fun EntityPopoutScreen(
                                 }
                             }
 
-                            Text(
-                                text = buildAnnotatedString {
-                                    append("Entity: ")
-                                    withStyle(SpanStyle(color = entityColor)) {
-                                        append(entity.name)
+                            val headerImageFile = remember(entity.imageFilePath, isGlobalEntity) {
+                                viewModel.resolveEntityImageFile(entity.imageFilePath, isGlobalEntity)
+                            }
+                            val headerImageBitmap = rememberEntityImage(headerImageFile)
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                modifier = Modifier.weight(1f, fill = false)
+                            ) {
+                                // Permanent Portrait Avatar Token
+                                Box(
+                                    modifier = Modifier
+                                        .size(46.dp)
+                                        .clip(CircleShape)
+                                        .background(GrimoireColors.SurfaceLow)
+                                        .border(2.dp, entityColor, CircleShape)
+                                        .clickable { selectedTabIndex = 1 },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (headerImageBitmap != null) {
+                                        Image(
+                                            bitmap = headerImageBitmap,
+                                            contentDescription = entity.name,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(entityColor.copy(alpha = 0.18f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = entity.name.trim().take(1).uppercase().ifBlank { "?" },
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = entityColor
+                                            )
+                                        }
                                     }
-                                    withStyle(SpanStyle(color = GrimoireColors.ParchmentMuted)) {
-                                        append(" (${entity.type})")
+                                }
+
+                                Column {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text(
+                                            text = entity.name,
+                                            style = MaterialTheme.typography.titleLarge,
+                                            fontWeight = FontWeight.Bold,
+                                            color = entityColor
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .background(entityColor.copy(alpha = 0.18f), RoundedCornerShape(4.dp))
+                                                .border(1.dp, entityColor.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = entity.type.uppercase(),
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                letterSpacing = 0.5.sp,
+                                                color = entityColor
+                                            )
+                                        }
                                     }
-                                },
-                                style = MaterialTheme.typography.titleLarge
-                            )
+                                    if (isGlobalEntity) {
+                                        Text(
+                                            text = "Globales Entity",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = GrimoireColors.ParchmentMuted,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                }
+                            }
+
                             Button(
                                 onClick = { showEditDialog = true },
                                 colors = ButtonDefaults.buttonColors(

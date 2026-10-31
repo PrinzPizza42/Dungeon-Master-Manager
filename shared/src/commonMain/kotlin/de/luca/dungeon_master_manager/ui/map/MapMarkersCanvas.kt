@@ -1,38 +1,60 @@
 package de.luca.dungeon_master_manager.ui.map
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.drawscope.scale
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.isPrimaryPressed
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import de.luca.dungeon_master_manager.data.MapMarker
+import de.luca.dungeon_master_manager.ui.components.EntityImageLoader
+import de.luca.dungeon_master_manager.ui.components.rememberEntityImage
+import de.luca.dungeon_master_manager.ui.theme.GrimoireColors
+import de.luca.dungeon_master_manager.ui.theme.GrimoireDivider
 import de.luca.dungeonmastermanager.database.Entity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.awt.Cursor
 import kotlin.math.pow
+import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 data class MarkerRenderData(
     val marker: MapMarker,
     val color: Color,
     val iconBitmap: ImageBitmap?,
+    val tokenBitmap: ImageBitmap?,
     val labelText: String?,
-    val entityName: String?
+    val entityName: String?,
+    val linkedEntity: Entity?
 )
 
 @Composable
@@ -48,11 +70,15 @@ fun MapMarkersCanvas(
     onDeleteMarker: (MapMarker) -> Unit,
     addPinMode: Boolean = false,
     onAddPin: ((x: Float, y: Float) -> Unit)? = null,
+    projectPath: String = "",
+    onHoverMarker: ((MarkerRenderData?) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
     val baseMarkerSizePx = with(density) { 24.dp.toPx() }
     val baseRadiusPx = baseMarkerSizePx / 2f
+    val baseTokenSizePx = with(density) { 29.dp.toPx() }
+    val baseTokenRadiusPx = baseTokenSizePx / 2f
 
     // O(1) Entity Map
     val entityById = remember(projectEntities, globalEntities) {
@@ -62,10 +88,10 @@ fun MapMarkersCanvas(
         map
     }
 
-    // Reactive cache triggers when icons load
+    // Reactive cache triggers when icons/tokens load
     var iconsLoadedTrigger by remember { mutableStateOf(0) }
 
-    LaunchedEffect(markers) {
+    LaunchedEffect(markers, entityById, projectPath) {
         var neededReload = false
         for (marker in markers) {
             val iconName = marker.iconFileName
@@ -73,20 +99,34 @@ fun MapMarkersCanvas(
                 MarkerIconCache.getIcon(iconName)
                 neededReload = true
             }
+            if (marker.isEntityLinked && marker.entityId != null && marker.iconFileName.isNullOrBlank()) {
+                val ent = entityById[marker.entityId]
+                if (ent != null) {
+                    val imgFile = EntityImageLoader.resolveEntityImageFile(ent, projectPath)
+                    if (imgFile != null && EntityImageLoader.getImageSync(imgFile) == null) {
+                        launch(Dispatchers.IO) {
+                            EntityImageLoader.loadImage(imgFile)
+                            iconsLoadedTrigger++
+                        }
+                    }
+                }
+            }
         }
         if (neededReload) {
             iconsLoadedTrigger++
         }
     }
 
-    val renderDataList = remember(markers, entityById, iconsLoadedTrigger) {
+    val renderDataList = remember(markers, entityById, iconsLoadedTrigger, projectPath) {
         markers.map { marker ->
             var markerColor = Color.Red
             var entityName: String? = null
+            var linkedEnt: Entity? = null
 
             if (marker.isEntityLinked && marker.entityId != null) {
                 val ent = entityById[marker.entityId]
                 if (ent != null) {
+                    linkedEnt = ent
                     entityName = ent.name
                     if (ent.color != null) {
                         try {
@@ -101,14 +141,21 @@ fun MapMarkersCanvas(
             }
 
             val iconBmp = marker.iconFileName?.let { MarkerIconCache.getIconSync(it) }
+            val tokenBmp = if (marker.iconFileName.isNullOrBlank() && linkedEnt != null) {
+                val imgFile = EntityImageLoader.resolveEntityImageFile(linkedEnt, projectPath)
+                EntityImageLoader.getImageSync(imgFile)
+            } else null
+
             val labelText = if (marker.isEntityLinked) entityName else marker.title
 
             MarkerRenderData(
                 marker = marker,
                 color = markerColor,
                 iconBitmap = iconBmp,
+                tokenBitmap = tokenBmp,
                 labelText = labelText,
-                entityName = entityName
+                entityName = entityName,
+                linkedEntity = linkedEnt
             )
         }
     }
@@ -141,26 +188,34 @@ fun MapMarkersCanvas(
                                     val r = renderDataList[i]
                                     val mx = r.marker.x * mapWidthPx
                                     val my = r.marker.y * mapHeightPx
+                                    val radius = if (r.tokenBitmap != null) {
+                                        (baseTokenRadiusPx + with(density) { 6.dp.toPx() }) * markerAdaptiveScale
+                                    } else {
+                                        hitRadius
+                                    }
                                     val dist = sqrt((p.x - mx) * (p.x - mx) + (p.y - my) * (p.y - my))
-                                    if (dist <= hitRadius) return r
+                                    if (dist <= radius) return r
                                 }
                                 return null
                             }
 
                             when (event.type) {
                                 PointerEventType.Move -> {
-                                    if (!addPinMode) {
+                                    if (!addPinMode && contextMenuMarker == null) {
                                         val found = findMarkerAt(pos)
                                         if (hoveredMarker?.marker?.id != found?.marker?.id) {
                                             hoveredMarker = found
+                                            onHoverMarker?.invoke(found)
                                         }
                                     } else {
                                         hoveredMarker = null
+                                        onHoverMarker?.invoke(null)
                                     }
                                 }
 
                                 PointerEventType.Exit -> {
                                     hoveredMarker = null
+                                    onHoverMarker?.invoke(null)
                                 }
 
                                 PointerEventType.Press -> {
@@ -177,8 +232,12 @@ fun MapMarkersCanvas(
                                             if (event.buttons.isSecondaryPressed) {
                                                 contextMenuMarker = found
                                                 emptySpaceContextMenuPos = null
+                                                hoveredMarker = null
+                                                onHoverMarker?.invoke(null)
                                                 event.changes.forEach { it.consume() }
                                             } else if (event.buttons.isPrimaryPressed) {
+                                                hoveredMarker = null
+                                                onHoverMarker?.invoke(null)
                                                 if (found.marker.isEntityLinked && found.marker.entityId != null) {
                                                     val ent = entityById[found.marker.entityId]
                                                     if (ent != null) {
@@ -215,56 +274,50 @@ fun MapMarkersCanvas(
                 val cx = r.marker.x * mapWidthPx
                 val cy = r.marker.y * mapHeightPx
 
-                val icon = r.iconBitmap
-                if (icon != null) {
-                    val half = currentSize / 2f
-                    drawImage(
-                        image = icon,
-                        dstOffset = IntOffset((cx - half).toInt(), (cy - half).toInt()),
-                        dstSize = IntSize(currentSize.toInt().coerceAtLeast(1), currentSize.toInt().coerceAtLeast(1))
-                    )
-                } else {
+                if (r.tokenBitmap != null) {
+                    val tokenSize = baseTokenSizePx * markerAdaptiveScale
+                    val tokenRadius = tokenSize / 2f
+                    val clipOval = Path().apply {
+                        addOval(Rect(cx - tokenRadius, cy - tokenRadius, cx + tokenRadius, cy + tokenRadius))
+                    }
+                    clipPath(clipOval) {
+                        drawImage(
+                            image = r.tokenBitmap,
+                            dstOffset = IntOffset((cx - tokenRadius).roundToInt(), (cy - tokenRadius).roundToInt()),
+                            dstSize = IntSize(tokenSize.roundToInt().coerceAtLeast(1), tokenSize.roundToInt().coerceAtLeast(1))
+                        )
+                    }
+                    // Border ring in entity color:
                     drawCircle(
                         color = r.color,
-                        radius = currentRadius,
-                        center = Offset(cx, cy)
+                        radius = tokenRadius,
+                        center = Offset(cx, cy),
+                        style = Stroke(width = (2.5f * markerAdaptiveScale).coerceIn(1.5f, 5f))
                     )
-                }
-            }
-        }
-
-        // Hover label overlay (at most 1)
-        if (hoveredMarker != null && !hoveredMarker!!.labelText.isNullOrBlank()) {
-            val r = hoveredMarker!!
-            val cx = r.marker.x * mapWidthPx
-            val cy = r.marker.y * mapHeightPx
-            val currentScale = scaleProvider()
-            val markerAdaptiveScale = (currentScale.pow(-0.85f)).coerceIn(0.02f, 2.0f)
-            val markerOffsetPx = with(density) { 14.dp.toPx() } * markerAdaptiveScale
-            val verticalOffsetPx = with(density) { 12.dp.toPx() } * markerAdaptiveScale
-
-            val labelX = with(density) { (cx + markerOffsetPx).toDp() }
-            val labelY = with(density) { (cy - verticalOffsetPx).toDp() }
-
-            Surface(
-                modifier = Modifier
-                    .offset(x = labelX, y = labelY)
-                    .graphicsLayer {
-                        scaleX = markerAdaptiveScale
-                        scaleY = markerAdaptiveScale
-                        transformOrigin = TransformOrigin(0f, 0f)
+                    // Outer dark rim for contrast:
+                    drawCircle(
+                        color = Color.Black.copy(alpha = 0.45f),
+                        radius = tokenRadius + (1f * markerAdaptiveScale),
+                        center = Offset(cx, cy),
+                        style = Stroke(width = (1f * markerAdaptiveScale).coerceIn(0.8f, 2f))
+                    )
+                } else {
+                    val icon = r.iconBitmap
+                    if (icon != null) {
+                        val half = currentSize / 2f
+                        drawImage(
+                            image = icon,
+                            dstOffset = IntOffset((cx - half).toInt(), (cy - half).toInt()),
+                            dstSize = IntSize(currentSize.toInt().coerceAtLeast(1), currentSize.toInt().coerceAtLeast(1))
+                        )
+                    } else {
+                        drawCircle(
+                            color = r.color,
+                            radius = currentRadius,
+                            center = Offset(cx, cy)
+                        )
                     }
-                    .wrapContentSize(unbounded = true)
-                    .widthIn(max = 160.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = MaterialTheme.shapes.small,
-                shadowElevation = 0.dp
-            ) {
-                Text(
-                    text = r.labelText!!,
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
-                    style = MaterialTheme.typography.labelSmall
-                )
+                }
             }
         }
 

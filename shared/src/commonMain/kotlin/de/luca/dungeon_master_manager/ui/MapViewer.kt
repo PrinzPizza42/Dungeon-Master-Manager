@@ -53,6 +53,15 @@ import de.luca.dungeon_master_manager.data.MapMarker
 import de.luca.dungeon_master_manager.random
 import de.luca.dungeon_master_manager.data.DefaultMarkerIcons
 import de.luca.dungeon_master_manager.ui.map.*
+import de.luca.dungeon_master_manager.ui.components.EntityImageLoader
+import de.luca.dungeon_master_manager.ui.components.rememberEntityImage
+import de.luca.dungeon_master_manager.ui.theme.GrimoireDivider
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
+import kotlin.math.sqrt
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.FolderOpen
@@ -164,6 +173,7 @@ fun MapViewer(
     }.collectAsState()
 
     var addPinMode by remember { mutableStateOf(false) }
+    var hoveredMarkerData by remember { mutableStateOf<MarkerRenderData?>(null) }
     val appSettings by AppSettingsRepository.settings.collectAsState()
     val isEcoMode = appSettings.isBatterySaverMode
 
@@ -274,6 +284,16 @@ fun MapViewer(
                                         targetScale = newTarget
                                         targetOffsetX = newTargetX
                                         targetOffsetY = newTargetY
+
+                                        if (hoveredMarkerData != null) {
+                                            val curMX = (viewportSize.width / 2f + newTargetX) + (hoveredMarkerData!!.marker.x - 0.5f) * baseMapWidth * newTarget
+                                            val curMY = (viewportSize.height / 2f + newTargetY) + (hoveredMarkerData!!.marker.y - 0.5f) * baseMapHeight * newTarget
+                                            val dCursorX = cursorPosition.x - curMX
+                                            val dCursorY = cursorPosition.y - curMY
+                                            if (sqrt(dCursorX * dCursorX + dCursorY * dCursorY) > with(density) { 36.dp.toPx() }) {
+                                                hoveredMarkerData = null
+                                            }
+                                        }
 
                                         zoomJob?.cancel()
                                         zoomJob = coroutineScope.launch {
@@ -399,6 +419,7 @@ fun MapViewer(
                         markers = visibleMarkers,
                         projectEntities = projectEnts,
                         globalEntities = globalEnts,
+                        projectPath = projectPath,
                         mapWidthPx = baseMapWidth,
                         mapHeightPx = baseMapHeight,
                         scaleProvider = { scale },
@@ -419,6 +440,7 @@ fun MapViewer(
                             showMarkerDialog = newMarker
                             addPinMode = false
                         },
+                        onHoverMarker = { hoveredMarkerData = it },
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -549,12 +571,268 @@ fun MapViewer(
                     }
                 }) { Text("-") }
                 Button(
-                    onClick = { addPinMode = !addPinMode },
+                    onClick = {
+                        addPinMode = !addPinMode
+                        if (addPinMode) hoveredMarkerData = null
+                    },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (addPinMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
                     )
                 ) {
                     Text(if (addPinMode) "Click Map to Place" else "Add Pin")
+                }
+            }
+        }
+
+        // 4. Viewport-level Rich Hover Card for Map Markers (Always 1.0x UI scale)
+        val activeHoverMarker = hoveredMarkerData
+        if (activeHoverMarker != null && showMarkerDialog == null && !addPinMode && viewportSize.width > 0 && viewportSize.height > 0) {
+            val cardWidthDp = 220.dp
+            val cardWidthPx = with(density) { cardWidthDp.toPx() }
+            var cardMeasuredHeightPx by remember { mutableStateOf(0) }
+
+            val curMarkerScreenX = (viewportSize.width / 2f + offsetX) + (activeHoverMarker.marker.x - 0.5f) * baseMapWidth * scale
+            val curMarkerScreenY = (viewportSize.height / 2f + offsetY) + (activeHoverMarker.marker.y - 0.5f) * baseMapHeight * scale
+
+            val isMarkerVisibleInViewport = curMarkerScreenX in -30f..(viewportSize.width + 30f) &&
+                                            curMarkerScreenY in -30f..(viewportSize.height + 30f)
+
+            if (isMarkerVisibleInViewport) {
+                Surface(
+                    modifier = Modifier
+                        .offset {
+                            val rawX = curMarkerScreenX - (cardWidthPx / 2f)
+                            val clampedX = rawX.coerceIn(12f, (viewportSize.width - cardWidthPx - 12f).coerceAtLeast(12f))
+
+                            val cardH = if (cardMeasuredHeightPx > 0) cardMeasuredHeightPx.toFloat() else 220f
+                            val spaceAbove = curMarkerScreenY - 24f
+                            val clampedY = if (spaceAbove >= cardH + 16f) {
+                                curMarkerScreenY - cardH - 18f
+                            } else {
+                                (curMarkerScreenY + 24f).coerceIn(12f, (viewportSize.height - cardH - 12f).coerceAtLeast(12f))
+                            }
+                            IntOffset(clampedX.roundToInt(), clampedY.roundToInt())
+                        }
+                        .onSizeChanged { cardMeasuredHeightPx = it.height }
+                        .width(cardWidthDp)
+                        .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(8.dp))
+                        .clickable {
+                            if (activeHoverMarker.linkedEntity != null) {
+                                onOpenEntityPopout(activeHoverMarker.linkedEntity.name)
+                            } else {
+                                showMarkerDialog = activeHoverMarker.marker
+                            }
+                            hoveredMarkerData = null
+                        },
+                    color = GrimoireColors.SurfaceCard,
+                    shadowElevation = 12.dp,
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        val ent = activeHoverMarker.linkedEntity
+                        if (ent != null) {
+                            // --- ENTITY MARKER ---
+                            val entColor = activeHoverMarker.color
+                            val imageFile = remember(ent.imageFilePath, projectPath) {
+                                EntityImageLoader.resolveEntityImageFile(ent, projectPath)
+                            }
+                            val imageBitmap = rememberEntityImage(imageFile)
+                            val fileExists = imageFile != null && imageFile.exists() && imageFile.isFile
+
+                            if (fileExists) {
+                                if (imageBitmap != null) {
+                                    val imgW = imageBitmap.width.toFloat()
+                                    val imgH = imageBitmap.height.toFloat()
+                                    val aspectRatio = if (imgH > 0f) imgW / imgH else 1f
+                                    val maxAllowedW = cardWidthDp - 20.dp
+                                    val targetH = 170.dp
+                                    val (dispW, dispH) = if (targetH * aspectRatio <= maxAllowedW) {
+                                        Pair((targetH * aspectRatio).coerceAtLeast(60.dp), targetH)
+                                    } else {
+                                        Pair(maxAllowedW, (maxAllowedW / aspectRatio).coerceAtLeast(60.dp))
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .size(dispW, dispH)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(GrimoireColors.SurfaceLow)
+                                            .border(1.5.dp, entColor, RoundedCornerShape(6.dp)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Image(
+                                            bitmap = imageBitmap,
+                                            contentDescription = ent.name,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Fit
+                                        )
+                                    }
+                                    Spacer(Modifier.height(8.dp))
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(110.dp)
+                                            .background(GrimoireColors.SurfaceLow, RoundedCornerShape(6.dp))
+                                            .border(1.dp, entColor.copy(alpha = 0.5f), RoundedCornerShape(6.dp)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            "Lade Portrait...",
+                                            color = GrimoireColors.ParchmentMuted,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                    Spacer(Modifier.height(8.dp))
+                                }
+                            } else {
+                                // Monogram emblem fallback
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(95.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(GrimoireColors.SurfaceLow)
+                                        .border(1.dp, GrimoireColors.BorderBronze.copy(alpha = 0.6f), RoundedCornerShape(6.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(46.dp)
+                                                .clip(CircleShape)
+                                                .background(entColor.copy(alpha = 0.18f))
+                                                .border(2.dp, entColor, CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = ent.name.trim().take(1).uppercase().ifBlank { "?" },
+                                                style = MaterialTheme.typography.titleLarge,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = entColor
+                                            )
+                                        }
+                                        Spacer(Modifier.height(6.dp))
+                                        Text(
+                                            text = "Kein Portrait hinterlegt",
+                                            color = GrimoireColors.ParchmentMuted,
+                                            fontSize = 10.sp
+                                        )
+                                    }
+                                }
+                                Spacer(Modifier.height(8.dp))
+                            }
+
+                            // Title & Type Badge
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = ent.name,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = GrimoireColors.ParchmentLight,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .background(entColor.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+                                        .border(1.dp, entColor.copy(alpha = 0.8f), RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = ent.type.uppercase(),
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.5.sp,
+                                        color = entColor
+                                    )
+                                }
+                            }
+
+                            if (!ent.notesFilePath.isNullOrBlank()) {
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = "Notizen: ${File(ent.notesFilePath).name}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = GrimoireColors.ParchmentMuted,
+                                    fontSize = 10.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+
+                            Spacer(Modifier.height(6.dp))
+                            GrimoireDivider(thickness = 0.5.dp, color = GrimoireColors.BorderBronze.copy(alpha = 0.4f))
+                            Spacer(Modifier.height(5.dp))
+                            Text(
+                                text = "Klicken zum Öffnen",
+                                color = GrimoireColors.GoldPrimary.copy(alpha = 0.85f),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        } else {
+                            // --- STANDALONE MARKER ---
+                            val title = activeHoverMarker.labelText ?: "Marker"
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(14.dp)
+                                        .clip(CircleShape)
+                                        .background(activeHoverMarker.color)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = title,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = GrimoireColors.ParchmentLight,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            if (!activeHoverMarker.marker.notes.isNullOrBlank()) {
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    text = activeHoverMarker.marker.notes,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = GrimoireColors.ParchmentMuted,
+                                    fontSize = 11.sp,
+                                    maxLines = 4,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+
+                            Spacer(Modifier.height(6.dp))
+                            GrimoireDivider(thickness = 0.5.dp, color = GrimoireColors.BorderBronze.copy(alpha = 0.4f))
+                            Spacer(Modifier.height(5.dp))
+                            Text(
+                                text = "Klicken zum Bearbeiten",
+                                color = GrimoireColors.GoldPrimary.copy(alpha = 0.85f),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
                 }
             }
         }
