@@ -35,12 +35,19 @@ fun main() {
         }
     }
 
+    val appIcon = AppIconManager.rememberAppIconPainter()
+
     Window(
         onCloseRequest = ::exitApplication,
         title = mainWindowTitle,
         state = mainWindowState,
         undecorated = true,
+        icon = appIcon,
     ) {
+        LaunchedEffect(window) {
+            AppIconManager.applyToWindow(window)
+        }
+
         GrimoireWindowFrame(
             window = window,
             windowState = mainWindowState,
@@ -71,7 +78,12 @@ fun main() {
                 title = entityTitle,
                 state = entityState,
                 undecorated = true,
+                icon = appIcon,
             ) {
+                LaunchedEffect(window) {
+                    AppIconManager.applyToWindow(window)
+                }
+
                 GrimoireTheme {
                     GrimoireWindowFrame(
                         window = window,
