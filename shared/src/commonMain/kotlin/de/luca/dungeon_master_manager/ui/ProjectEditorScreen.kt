@@ -25,9 +25,14 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
+import de.luca.dungeon_master_manager.data.AppSettingsRepository
 import de.luca.dungeon_master_manager.data.CreatableFileType
 import de.luca.dungeon_master_manager.data.EntityPopoutRequest
 import de.luca.dungeon_master_manager.data.FileExtensions
+import kotlinx.coroutines.launch
 import de.luca.dungeon_master_manager.ui.components.EditorUnifiedTopBar
 import de.luca.dungeon_master_manager.ui.components.ExplorerDropPayload
 import de.luca.dungeon_master_manager.ui.components.GrimoireTitleBar
@@ -111,6 +116,20 @@ fun ProjectEditorScreen(
         list
     }
 
+    val settings by AppSettingsRepository.settings.collectAsState()
+    val coroutineScope = rememberCoroutineScope()
+    var isExplorerVisible by remember(settings.isExplorerSidebarVisible) {
+        mutableStateOf(settings.isExplorerSidebarVisible)
+    }
+
+    val toggleExplorer = {
+        val next = !isExplorerVisible
+        isExplorerVisible = next
+        coroutineScope.launch {
+            AppSettingsRepository.setExplorerSidebarVisible(next)
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize().background(GrimoireColors.Background)) {
         // Unified Top Titlebar (replaces old EditorToolbar and TabBar)
         if (window != null && windowState != null) {
@@ -124,44 +143,49 @@ fun ProjectEditorScreen(
                 onTabPopOut = { viewModel.popOutTab(it) },
                 onBack = onBackToLauncher,
                 windowState = windowState,
-                onCloseRequest = onCloseRequest
+                onCloseRequest = onCloseRequest,
+                isExplorerVisible = isExplorerVisible,
+                onToggleExplorer = { toggleExplorer() }
             )
         }
 
         // Main content: sidebar + editor
         Row(modifier = Modifier.fillMaxSize()) {
             // Sidebar
-            EditorSidebar(
-                fileTree = fileTree,
-                expandedPaths = expandedPaths,
-                activeFilePath = activeTabPath,
-                projectPath = viewModel.project.path,
-                dropNotice = dropNotice,
-                onDismissDropNotice = { viewModel.dismissDropNotice() },
-                onNodeClick = { viewModel.openFile(it) },
-                onCreateFile = { folder, file -> viewModel.createNewFile(folder, file) },
-                onRenameFile = { node, newName -> viewModel.renameFile(node, newName) },
-                onMoveFile = { node, folder -> viewModel.moveFile(node, folder) },
-                onDeleteFile = { node -> viewModel.deleteFile(node) },
-                onPopOutClick = { node -> viewModel.openAsWindow(node) },
-                onExternalFilesDropped = { files, targetDir -> viewModel.importExternalFiles(files, targetDir) },
-                onInternalFileMoved = { sourcePath, targetDir -> viewModel.moveInternalFile(sourcePath, targetDir) },
-                onDragTransferCompleted = { filePath -> viewModel.onDragTransferCompleted(filePath) },
-                onOpenNativeExplorer = {
-                    try {
-                        val file = java.io.File(viewModel.project.path)
-                        if (java.awt.Desktop.isDesktopSupported()) {
-                            java.awt.Desktop.getDesktop().open(file)
+            if (isExplorerVisible) {
+                EditorSidebar(
+                    fileTree = fileTree,
+                    expandedPaths = expandedPaths,
+                    activeFilePath = activeTabPath,
+                    projectPath = viewModel.project.path,
+                    dropNotice = dropNotice,
+                    onDismissDropNotice = { viewModel.dismissDropNotice() },
+                    onNodeClick = { viewModel.openFile(it) },
+                    onCreateFile = { folder, file -> viewModel.createNewFile(folder, file) },
+                    onRenameFile = { node, newName -> viewModel.renameFile(node, newName) },
+                    onMoveFile = { node, folder -> viewModel.moveFile(node, folder) },
+                    onDeleteFile = { node -> viewModel.deleteFile(node) },
+                    onPopOutClick = { node -> viewModel.openAsWindow(node) },
+                    onExternalFilesDropped = { files, targetDir -> viewModel.importExternalFiles(files, targetDir) },
+                    onInternalFileMoved = { sourcePath, targetDir -> viewModel.moveInternalFile(sourcePath, targetDir) },
+                    onDragTransferCompleted = { filePath -> viewModel.onDragTransferCompleted(filePath) },
+                    onOpenNativeExplorer = {
+                        try {
+                            val file = java.io.File(viewModel.project.path)
+                            if (java.awt.Desktop.isDesktopSupported()) {
+                                java.awt.Desktop.getDesktop().open(file)
+                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
                         }
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                },
-                onManageEntities = { showEntityDialog = true },
-                modifier = Modifier.width(260.dp).fillMaxHeight(),
-            )
+                    },
+                    onManageEntities = { showEntityDialog = true },
+                    onToggleCollapse = { toggleExplorer() },
+                    modifier = Modifier.width(260.dp).fillMaxHeight(),
+                )
 
-            VerticalDivider(color = GrimoireColors.BorderBronze)
+                VerticalDivider(color = GrimoireColors.BorderBronze)
+            }
 
             // Content Area (Active tab or Empty state)
             Box(modifier = Modifier.fillMaxSize()) {
@@ -208,6 +232,30 @@ fun ProjectEditorScreen(
                                 "Select a file from the explorer to view or edit",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = GrimoireColors.ParchmentDim,
+                            )
+                        }
+                    }
+                }
+
+                // Docked Flap to Show Explorer when hidden (mirroring Timeline Sidebar flap)
+                if (!isExplorerVisible) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(top = 48.dp, start = 0.dp)
+                    ) {
+                        IconButton(
+                            onClick = { toggleExplorer() },
+                            modifier = Modifier
+                                .size(24.dp)
+                                .background(GrimoireColors.SurfaceCard, RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp))
+                                .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ChevronRight,
+                                contentDescription = "Show Explorer",
+                                tint = GrimoireColors.GoldPrimary,
+                                modifier = Modifier.size(16.dp)
                             )
                         }
                     }
@@ -450,6 +498,7 @@ private fun EditorSidebar(
     onDragTransferCompleted: (String) -> Unit = {},
     onOpenNativeExplorer: () -> Unit,
     onManageEntities: () -> Unit,
+    onToggleCollapse: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var showNewFileDialog by remember { mutableStateOf(false) }
@@ -512,7 +561,7 @@ private fun EditorSidebar(
                     letterSpacing = 1.sp
                 )
                 
-                Row {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     TextButton(
                         onClick = onOpenNativeExplorer,
                         contentPadding = PaddingValues(0.dp),
@@ -523,9 +572,20 @@ private fun EditorSidebar(
                     TextButton(
                         onClick = { showNewFileDialog = true },
                         contentPadding = PaddingValues(0.dp),
-                        modifier = Modifier.defaultMinSize(minWidth = 28.dp, minHeight = 28.dp)
+                        modifier = Modifier.defaultMinSize(minWidth = 28.dp, minHeight = 28.dp).padding(end = 4.dp)
                     ) {
                         Text("+", fontSize = 16.sp, color = GrimoireColors.GoldPrimary, fontWeight = FontWeight.Bold)
+                    }
+                    IconButton(
+                        onClick = onToggleCollapse,
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ChevronLeft,
+                            contentDescription = "Hide Explorer",
+                            tint = GrimoireColors.ParchmentMuted,
+                            modifier = Modifier.size(16.dp)
+                        )
                     }
                 }
             }

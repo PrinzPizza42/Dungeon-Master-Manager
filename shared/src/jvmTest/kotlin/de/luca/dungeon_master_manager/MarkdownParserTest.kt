@@ -1022,6 +1022,12 @@ wawdawawdawdawdawwd awd awdwd awdawd awd awd awdwd awdwdadadawdawd awd
     }
 
     @Test
+    fun testAppSettings_ExplorerSidebarVisible() {
+        val defaultSettings = de.luca.dungeon_master_manager.data.AppSettings()
+        assertTrue(defaultSettings.isExplorerSidebarVisible)
+    }
+
+    @Test
     fun testCleanHeadingTitle() {
         assertEquals("Title", cleanHeadingTitle("**Title**"))
         assertEquals("Bold & Italic", cleanHeadingTitle("**Bold** & *Italic*"))

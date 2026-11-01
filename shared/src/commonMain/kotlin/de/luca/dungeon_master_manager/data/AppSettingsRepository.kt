@@ -66,6 +66,10 @@ object AppSettingsRepository {
         updateSettings { it.copy(isEditorTimelineVisible = visible) }
     }
 
+    suspend fun setExplorerSidebarVisible(visible: Boolean) {
+        updateSettings { it.copy(isExplorerSidebarVisible = visible) }
+    }
+
     suspend fun updateSettings(transform: (AppSettings) -> AppSettings) = withContext(Dispatchers.IO) {
         mutex.withLock {
             val current = _settings.value

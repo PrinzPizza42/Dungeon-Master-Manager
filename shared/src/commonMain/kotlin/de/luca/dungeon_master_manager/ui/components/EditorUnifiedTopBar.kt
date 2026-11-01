@@ -4,6 +4,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -46,7 +49,9 @@ fun EditorUnifiedTopBar(
     onBack: () -> Unit,
     onCloseRequest: () -> Unit,
     modifier: Modifier = Modifier,
-    onManageEntities: (() -> Unit)? = null
+    onManageEntities: (() -> Unit)? = null,
+    isExplorerVisible: Boolean = true,
+    onToggleExplorer: (() -> Unit)? = null,
 ) {
     LaunchedEffect(window) {
         WindowsDwmHelper.install(window)
@@ -65,11 +70,12 @@ fun EditorUnifiedTopBar(
             .height(38.dp)
             .background(GrimoireColors.SurfaceLow)
     ) {
-        // --- Left Section: Navigation & Campaign Name (Width: 260dp matching Explorer sidebar) ---
+        // --- Left Section: Navigation & Campaign Name (Width: 260dp matching Explorer sidebar when visible) ---
+        val leftSectionWidth = if (isExplorerVisible) 260.dp else 220.dp
         Row(
             modifier = Modifier
                 .align(Alignment.CenterStart)
-                .width(260.dp)
+                .width(leftSectionWidth)
                 .padding(start = 10.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -114,24 +120,41 @@ fun EditorUnifiedTopBar(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
             )
+
+            if (onToggleExplorer != null) {
+                IconButton(
+                    onClick = onToggleExplorer,
+                    modifier = Modifier.size(24.dp).padding(start = 2.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isExplorerVisible) Icons.Default.ChevronLeft else Icons.Default.ChevronRight,
+                        contentDescription = if (isExplorerVisible) "Hide Explorer" else "Show Explorer",
+                        tint = if (isExplorerVisible) GrimoireColors.GoldPrimary else GrimoireColors.ParchmentMuted,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
         }
 
-        // Vertical divider at 260dp lining up exactly with the sidebar divider
-        Box(
-            modifier = Modifier
-                .align(Alignment.CenterStart)
-                .offset(x = 260.dp)
-                .width(1.dp)
-                .fillMaxHeight()
-                .background(GrimoireColors.BorderBronze)
-        )
+        // Vertical divider at 260dp lining up exactly with the sidebar divider if visible
+        if (isExplorerVisible) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .offset(x = 260.dp)
+                    .width(1.dp)
+                    .fillMaxHeight()
+                    .background(GrimoireColors.BorderBronze)
+            )
+        }
 
         // --- Middle Section: Tabs + Draggable Area ---
-        // Padded on left (261dp) to start right after the sidebar divider, and right (124dp) for window controls
+        // Padded on left to start right after the sidebar divider (or left section if sidebar is hidden)
+        val tabsStartPadding = if (isExplorerVisible) 261.dp else (leftSectionWidth + 6.dp)
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 261.dp, end = 124.dp),
+                .padding(start = tabsStartPadding, end = 124.dp),
             contentAlignment = Alignment.CenterStart
         ) {
             val minDragWidth = 60.dp
