@@ -17,6 +17,15 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.text.input.ImeAction
+import de.luca.dungeon_master_manager.data.CreatableFileType
 import de.luca.dungeon_master_manager.data.EntityPopoutRequest
 import de.luca.dungeon_master_manager.data.FileExtensions
 import de.luca.dungeon_master_manager.ui.components.EditorUnifiedTopBar
@@ -667,132 +676,409 @@ private fun EditorSidebar(
     }
 
     if (showNewFileDialog && fileTree != null) {
+        val folders: List<String> = remember(fileTree) {
+            val list = fileTree.children.filter { it.isDirectory }.map { it.name }
+            if (list.isEmpty()) listOf("") else list
+        }
+        val defaultFolder: String = remember(folders, activeFilePath) {
+            val activeDirName = activeFilePath?.let { File(it).parentFile?.name }
+            if (activeDirName != null && folders.contains(activeDirName)) {
+                activeDirName
+            } else {
+                folders.firstOrNull() ?: ""
+            }
+        }
+        var selectedFolder by remember { mutableStateOf(defaultFolder) }
+        var selectedFileType by remember {
+            mutableStateOf(FileExtensions.defaultFileTypeForFolder(defaultFolder))
+        }
         var fileName by remember { mutableStateOf("") }
-        val folders = fileTree.children.filter { it.isDirectory }.map { it.name }
-        var selectedFolder by remember { mutableStateOf(folders.firstOrNull() ?: "") }
+        var expandedFolderDropdown by remember { mutableStateOf(false) }
+        var expandedTypeDropdown by remember { mutableStateOf(false) }
+
+        val finalFileName = FileExtensions.sanitizeFileName(fileName, selectedFileType.extension)
+        val canCreate = finalFileName.isNotBlank() && selectedFolder.isNotBlank()
+
+        fun doCreate() {
+            if (canCreate) {
+                onCreateFile(selectedFolder, finalFileName)
+                showNewFileDialog = false
+            }
+        }
 
         AlertDialog(
             onDismissRequest = { showNewFileDialog = false },
-            title = { Text("New Manuscript / Note", style = MaterialTheme.typography.titleLarge, color = GrimoireColors.GoldPrimary) },
-            containerColor = GrimoireColors.SurfaceCard,
-            shape = RoundedCornerShape(8.dp),
-            text = {
-                Column {
-                    OutlinedTextField(
-                        value = fileName,
-                        onValueChange = { fileName = it },
-                        label = { Text("File Name (e.g. notes.txt or story.md)", color = GrimoireColors.ParchmentMuted) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = GrimoireColors.GoldPrimary,
-                            unfocusedBorderColor = GrimoireColors.BorderBronze,
-                            focusedTextColor = GrimoireColors.ParchmentLight,
-                            unfocusedTextColor = GrimoireColors.ParchmentLight,
-                        )
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(selectedFileType.icon, fontSize = 22.sp, modifier = Modifier.padding(end = 10.dp))
+                    Text(
+                        "New File",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = GrimoireColors.GoldPrimary,
+                        fontWeight = FontWeight.Bold
                     )
-                    Spacer(Modifier.height(16.dp))
-                    Text("Select Folder:", style = MaterialTheme.typography.labelMedium, color = GrimoireColors.ParchmentMuted)
-                    Spacer(Modifier.height(8.dp))
-                    val scrollState = rememberScrollState()
-                    var expandedDropdown by remember { mutableStateOf(false) }
-                    ExposedDropdownMenuBox(
-                        expanded = expandedDropdown,
-                        onExpandedChange = { expandedDropdown = !expandedDropdown }
-                    ) {
+                }
+            },
+            containerColor = GrimoireColors.SurfaceCard,
+            shape = RoundedCornerShape(10.dp),
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(min = 380.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // 1. File Name field with extension suffix
+                    Column {
+                        Text(
+                            "Name",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = GrimoireColors.ParchmentMuted,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(Modifier.height(4.dp))
                         OutlinedTextField(
-                            value = selectedFolder,
-                            onValueChange = {},
-                            readOnly = true,
-                            modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true),
+                            value = fileName,
+                            onValueChange = { fileName = it },
+                            placeholder = {
+                                Text(
+                                    when (selectedFileType.extension) {
+                                        "md" -> "e.g. Session 1, Chapter 2, Quest Log"
+                                        "map" -> "e.g. Castle Dungeon, Tavern, Overworld"
+                                        "txt" -> "e.g. scratchpad, notes, summary"
+                                        "json" -> "e.g. encounter_tables, config"
+                                        else -> "e.g. my_file"
+                                    },
+                                    color = GrimoireColors.ParchmentMuted.copy(alpha = 0.5f),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            },
+                            suffix = {
+                                Text(
+                                    ".${selectedFileType.extension}",
+                                    color = GrimoireColors.GoldPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { doCreate() }),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .onPreviewKeyEvent {
+                                    if ((it.key == Key.Enter || it.key == Key.NumPadEnter) && it.type == KeyEventType.KeyUp) {
+                                        doCreate()
+                                        true
+                                    } else false
+                                },
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = GrimoireColors.GoldPrimary,
                                 unfocusedBorderColor = GrimoireColors.BorderBronze,
                                 focusedTextColor = GrimoireColors.ParchmentLight,
                                 unfocusedTextColor = GrimoireColors.ParchmentLight,
+                                cursorColor = GrimoireColors.GoldPrimary,
                             )
                         )
-                        DropdownMenu(
-                            expanded = expandedDropdown,
-                            onDismissRequest = { expandedDropdown = false },
-                            modifier = Modifier.background(GrimoireColors.SurfaceCard),
-                            content = {
-                                folders.forEach { folder ->
+                    }
+
+                    // 2. File Type Dropdown
+                    Column {
+                        Text(
+                            "File Type",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = GrimoireColors.ParchmentMuted,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        ExposedDropdownMenuBox(
+                            expanded = expandedTypeDropdown,
+                            onExpandedChange = { expandedTypeDropdown = !expandedTypeDropdown },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            OutlinedTextField(
+                                value = "${selectedFileType.icon}  ${selectedFileType.name}",
+                                onValueChange = {},
+                                readOnly = true,
+                                trailingIcon = {
+                                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedTypeDropdown)
+                                },
+                                modifier = Modifier
+                                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
+                                    .fillMaxWidth(),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = GrimoireColors.GoldPrimary,
+                                    unfocusedBorderColor = GrimoireColors.BorderBronze,
+                                    focusedTextColor = GrimoireColors.ParchmentLight,
+                                    unfocusedTextColor = GrimoireColors.ParchmentLight,
+                                )
+                            )
+                            DropdownMenu(
+                                expanded = expandedTypeDropdown,
+                                onDismissRequest = { expandedTypeDropdown = false },
+                                modifier = Modifier
+                                    .background(GrimoireColors.SurfaceCard)
+                                    .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(4.dp))
+                            ) {
+                                FileExtensions.CREATABLE_FILE_TYPES.forEach { fileType ->
+                                    val isSelected = fileType.extension == selectedFileType.extension
                                     DropdownMenuItem(
-                                        text = { Text(folder, color = GrimoireColors.ParchmentLight) },
+                                        leadingIcon = {
+                                            Text(fileType.icon, fontSize = 20.sp)
+                                        },
+                                        text = {
+                                            Column(modifier = Modifier.padding(vertical = 2.dp)) {
+                                                Text(
+                                                    fileType.name,
+                                                    color = if (isSelected) GrimoireColors.GoldPrimary else GrimoireColors.ParchmentLight,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                                    style = MaterialTheme.typography.bodyMedium
+                                                )
+                                                Text(
+                                                    fileType.description,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = GrimoireColors.ParchmentMuted,
+                                                    fontSize = 12.sp
+                                                )
+                                            }
+                                        },
                                         onClick = {
-                                            selectedFolder = folder
-                                            expandedDropdown = false
-                                        }
+                                            selectedFileType = fileType
+                                            expandedTypeDropdown = false
+                                        },
+                                        modifier = Modifier.background(
+                                            if (isSelected) GrimoireColors.GoldContainer.copy(alpha = 0.25f) else Color.Transparent
+                                        )
                                     )
                                 }
-                            },
-                            scrollState = scrollState
+                            }
+                        }
+                    }
+
+                    // 3. Destination Folder Dropdown
+                    Column {
+                        Text(
+                            "Destination Folder",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = GrimoireColors.ParchmentMuted,
+                            fontWeight = FontWeight.Medium
                         )
+                        Spacer(Modifier.height(4.dp))
+                        ExposedDropdownMenuBox(
+                            expanded = expandedFolderDropdown,
+                            onExpandedChange = { expandedFolderDropdown = !expandedFolderDropdown },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            OutlinedTextField(
+                                value = if (selectedFolder.isNotBlank()) "📁  $selectedFolder" else "(Project Root)",
+                                onValueChange = {},
+                                readOnly = true,
+                                trailingIcon = {
+                                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedFolderDropdown)
+                                },
+                                modifier = Modifier
+                                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
+                                    .fillMaxWidth(),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = GrimoireColors.GoldPrimary,
+                                    unfocusedBorderColor = GrimoireColors.BorderBronze,
+                                    focusedTextColor = GrimoireColors.ParchmentLight,
+                                    unfocusedTextColor = GrimoireColors.ParchmentLight,
+                                )
+                            )
+                            DropdownMenu(
+                                expanded = expandedFolderDropdown,
+                                onDismissRequest = { expandedFolderDropdown = false },
+                                modifier = Modifier
+                                    .background(GrimoireColors.SurfaceCard)
+                                    .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(4.dp))
+                            ) {
+                                folders.forEach { folder ->
+                                    val isSelected = folder == selectedFolder
+                                    DropdownMenuItem(
+                                        leadingIcon = { Text("📁", fontSize = 16.sp) },
+                                        text = {
+                                            Text(
+                                                folder,
+                                                color = if (isSelected) GrimoireColors.GoldPrimary else GrimoireColors.ParchmentLight,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        },
+                                        onClick = {
+                                            selectedFolder = folder
+                                            expandedFolderDropdown = false
+                                            if (fileName.isBlank()) {
+                                                selectedFileType = FileExtensions.defaultFileTypeForFolder(folder)
+                                            }
+                                        },
+                                        modifier = Modifier.background(
+                                            if (isSelected) GrimoireColors.GoldContainer.copy(alpha = 0.25f) else Color.Transparent
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // 4. Live Preview Box
+                    val previewPath = if (finalFileName.isNotBlank()) {
+                        if (selectedFolder.isNotBlank()) "$selectedFolder/$finalFileName" else finalFileName
+                    } else {
+                        if (selectedFolder.isNotBlank()) "$selectedFolder/<name>.${selectedFileType.extension}" else "<name>.${selectedFileType.extension}"
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = GrimoireColors.SurfaceLow,
+                        border = BorderStroke(1.dp, GrimoireColors.BorderBronze.copy(alpha = 0.4f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Will create: ",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = GrimoireColors.ParchmentMuted
+                            )
+                            Text(
+                                previewPath,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (finalFileName.isNotBlank()) GrimoireColors.GoldBright else GrimoireColors.ParchmentMuted
+                            )
+                        }
                     }
                 }
             },
             confirmButton = {
                 Button(
-                    onClick = {
-                        if (fileName.isNotBlank() && selectedFolder.isNotBlank()) {
-                            onCreateFile(selectedFolder, fileName)
-                            showNewFileDialog = false
-                        }
-                    },
+                    onClick = { doCreate() },
+                    enabled = canCreate,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = GrimoireColors.GoldPrimary,
-                        contentColor = GrimoireColors.Background
+                        contentColor = GrimoireColors.Background,
+                        disabledContainerColor = GrimoireColors.SurfaceLow,
+                        disabledContentColor = GrimoireColors.ParchmentMuted.copy(alpha = 0.5f)
                     )
-                ) { Text("Create") }
+                ) {
+                    Text("Create File", fontWeight = FontWeight.Bold)
+                }
             },
             dismissButton = {
-                TextButton(onClick = { showNewFileDialog = false }) { 
-                    Text("Cancel", color = GrimoireColors.ParchmentMuted) 
+                TextButton(onClick = { showNewFileDialog = false }) {
+                    Text("Cancel", color = GrimoireColors.ParchmentMuted)
                 }
             }
         )
     }
 
     if (fileToRename != null) {
-        var newName by remember { mutableStateOf(fileToRename!!.name) }
+        val targetNode = fileToRename!!
+        val isDirectory = targetNode.isDirectory
+        val extension = targetNode.extension
+        val initialBaseName = remember(targetNode) {
+            if (!isDirectory && extension.isNotEmpty()) {
+                targetNode.name.removeSuffix(".$extension")
+            } else {
+                targetNode.name
+            }
+        }
+        var newBaseName by remember(targetNode) { mutableStateOf(initialBaseName) }
+        val finalRenameName = if (!isDirectory && extension.isNotEmpty()) {
+            FileExtensions.sanitizeFileName(newBaseName, extension)
+        } else {
+            newBaseName.trim()
+        }
+        val canRename = finalRenameName.isNotBlank() && finalRenameName != targetNode.name
+
+        fun doRename() {
+            if (canRename) {
+                onRenameFile(targetNode, finalRenameName)
+                fileToRename = null
+            }
+        }
+
         AlertDialog(
             onDismissRequest = { fileToRename = null },
-            title = { Text("Rename File", style = MaterialTheme.typography.titleLarge, color = GrimoireColors.GoldPrimary) },
-            containerColor = GrimoireColors.SurfaceCard,
-            shape = RoundedCornerShape(8.dp),
-            text = {
-                OutlinedTextField(
-                    value = newName,
-                    onValueChange = { newName = it },
-                    label = { Text("New Name", color = GrimoireColors.ParchmentMuted) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = GrimoireColors.GoldPrimary,
-                        unfocusedBorderColor = GrimoireColors.BorderBronze,
-                        focusedTextColor = GrimoireColors.ParchmentLight,
-                        unfocusedTextColor = GrimoireColors.ParchmentLight,
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (isDirectory) "📁" else (FileExtensions.CREATABLE_FILE_TYPES.firstOrNull { it.extension == extension }?.icon ?: "📄"),
+                        fontSize = 20.sp,
+                        modifier = Modifier.padding(end = 8.dp)
                     )
-                )
+                    Text(
+                        if (isDirectory) "Rename Folder" else "Rename File",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = GrimoireColors.GoldPrimary,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            containerColor = GrimoireColors.SurfaceCard,
+            shape = RoundedCornerShape(10.dp),
+            text = {
+                Column(modifier = Modifier.fillMaxWidth().widthIn(min = 360.dp)) {
+                    OutlinedTextField(
+                        value = newBaseName,
+                        onValueChange = { newBaseName = it },
+                        label = { Text(if (isDirectory) "Folder Name" else "File Name", color = GrimoireColors.ParchmentMuted) },
+                        suffix = if (!isDirectory && extension.isNotEmpty()) {
+                            {
+                                Text(
+                                    ".$extension",
+                                    color = GrimoireColors.GoldPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        } else null,
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { doRename() }),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onPreviewKeyEvent {
+                                if ((it.key == Key.Enter || it.key == Key.NumPadEnter) && it.type == KeyEventType.KeyUp) {
+                                    doRename()
+                                    true
+                                } else false
+                            },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = GrimoireColors.GoldPrimary,
+                            unfocusedBorderColor = GrimoireColors.BorderBronze,
+                            focusedTextColor = GrimoireColors.ParchmentLight,
+                            unfocusedTextColor = GrimoireColors.ParchmentLight,
+                            cursorColor = GrimoireColors.GoldPrimary,
+                        )
+                    )
+                    if (!isDirectory && extension.isNotEmpty() && finalRenameName.isNotBlank() && finalRenameName != targetNode.name) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "New name: $finalRenameName",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = GrimoireColors.GoldBright
+                        )
+                    }
+                }
             },
             confirmButton = {
                 Button(
-                    onClick = {
-                        if (newName.isNotBlank()) {
-                            onRenameFile(fileToRename!!, newName)
-                            fileToRename = null
-                        }
-                    },
+                    onClick = { doRename() },
+                    enabled = canRename,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = GrimoireColors.GoldPrimary,
-                        contentColor = GrimoireColors.Background
+                        contentColor = GrimoireColors.Background,
+                        disabledContainerColor = GrimoireColors.SurfaceLow,
+                        disabledContentColor = GrimoireColors.ParchmentMuted.copy(alpha = 0.5f)
                     )
-                ) { Text("Rename") }
+                ) { Text("Rename", fontWeight = FontWeight.Bold) }
             },
             dismissButton = {
-                TextButton(onClick = { fileToRename = null }) { 
-                    Text("Cancel", color = GrimoireColors.ParchmentMuted) 
+                TextButton(onClick = { fileToRename = null }) {
+                    Text("Cancel", color = GrimoireColors.ParchmentMuted)
                 }
             }
         )

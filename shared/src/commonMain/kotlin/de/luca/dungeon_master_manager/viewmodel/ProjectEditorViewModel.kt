@@ -377,9 +377,10 @@ class ProjectEditorViewModel(
                     newFile.parentFile?.mkdirs()
                     newFile.createNewFile()
                     
-                    if (safeName.endsWith(".md")) {
-                        fileService.writeFile(newFile.absolutePath, "# ${safeName.removeSuffix(".md")}\n\n")
-                    } else if (safeName.endsWith(".map")) {
+                    if (safeName.endsWith(".md", ignoreCase = true)) {
+                        val title = safeName.substringBeforeLast('.')
+                        fileService.writeFile(newFile.absolutePath, "# $title\n\n")
+                    } else if (safeName.endsWith(".map", ignoreCase = true)) {
                         fileService.writeFile(newFile.absolutePath, "{\"imagePath\": \"\", \"markers\": []}")
                     } else {
                         fileService.writeFile(newFile.absolutePath, "")

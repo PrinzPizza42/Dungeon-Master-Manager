@@ -65,4 +65,67 @@ class FileExtensionsTest {
         assertTrue(FileExtensions.isAudio("mp3"))
         assertTrue(FileExtensions.isArchive("zip"))
     }
+
+    @Test
+    fun testCreatableFileTypes() {
+        val types = FileExtensions.CREATABLE_FILE_TYPES
+        assertTrue(types.isNotEmpty(), "Creatable file types should not be empty")
+
+        val extensions = types.map { it.extension }
+        assertTrue("md" in extensions, "Markdown should be creatable")
+        assertTrue("map" in extensions, "Map should be creatable")
+        assertTrue("txt" in extensions, "Plain text should be creatable")
+        assertTrue("json" in extensions, "JSON should be creatable")
+
+        // All creatable file types should be editable text and supported in the app
+        for (type in types) {
+            assertTrue(FileExtensions.isEditableText(type.extension), "${type.extension} should be editable")
+            assertTrue(FileExtensions.isSupportedInApp(type.extension), "${type.extension} should be supported in app")
+            assertTrue(type.name.isNotBlank(), "Name should not be blank")
+            assertTrue(type.icon.isNotBlank(), "Icon should not be blank")
+            assertTrue(type.description.isNotBlank(), "Description should not be blank")
+        }
+    }
+
+    @Test
+    fun testDefaultFileTypeForFolder() {
+        val mapsDefault = FileExtensions.defaultFileTypeForFolder("Maps")
+        kotlin.test.assertEquals("map", mapsDefault.extension)
+
+        val battlemapsDefault = FileExtensions.defaultFileTypeForFolder("battle_maps")
+        kotlin.test.assertEquals("map", battlemapsDefault.extension)
+
+        val storyDefault = FileExtensions.defaultFileTypeForFolder("Story")
+        kotlin.test.assertEquals("md", storyDefault.extension)
+
+        val rootDefault = FileExtensions.defaultFileTypeForFolder("")
+        kotlin.test.assertEquals("md", rootDefault.extension)
+    }
+
+    @Test
+    fun testSanitizeFileName() {
+        // Base name only
+        kotlin.test.assertEquals("Chapter 1.md", FileExtensions.sanitizeFileName("Chapter 1", "md"))
+        kotlin.test.assertEquals("Tavern.map", FileExtensions.sanitizeFileName("Tavern", "map"))
+        kotlin.test.assertEquals("data.json", FileExtensions.sanitizeFileName("data", "json"))
+
+        // Already typed extension (case-insensitive)
+        kotlin.test.assertEquals("Chapter 1.md", FileExtensions.sanitizeFileName("Chapter 1.md", "md"))
+        kotlin.test.assertEquals("Chapter 1.md", FileExtensions.sanitizeFileName("Chapter 1.MD", "md"))
+        kotlin.test.assertEquals("Tavern.map", FileExtensions.sanitizeFileName("Tavern.map", "map"))
+
+        // Trailing dots
+        kotlin.test.assertEquals("Chapter 1.md", FileExtensions.sanitizeFileName("Chapter 1.", "md"))
+        kotlin.test.assertEquals("Chapter 1.md", FileExtensions.sanitizeFileName("Chapter 1...", "md"))
+
+        // Whitespace trimming
+        kotlin.test.assertEquals("Chapter 1.md", FileExtensions.sanitizeFileName("  Chapter 1  ", "md"))
+        kotlin.test.assertEquals("Chapter 1.md", FileExtensions.sanitizeFileName("  Chapter 1.md  ", "md"))
+
+        // Blank or extension only
+        kotlin.test.assertEquals("", FileExtensions.sanitizeFileName("", "md"))
+        kotlin.test.assertEquals("", FileExtensions.sanitizeFileName("   ", "md"))
+        kotlin.test.assertEquals("", FileExtensions.sanitizeFileName(".md", "md"))
+        kotlin.test.assertEquals("", FileExtensions.sanitizeFileName("...", "md"))
+    }
 }
