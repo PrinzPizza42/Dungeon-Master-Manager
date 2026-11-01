@@ -18,6 +18,8 @@ import de.luca.dungeon_master_manager.ui.findEntityAtPosition
 import de.luca.dungeon_master_manager.ui.findImageLinkAtPosition
 import de.luca.dungeon_master_manager.ui.resolveImageFile
 import de.luca.dungeon_master_manager.ui.components.ImagePickerHelper
+import de.luca.dungeon_master_manager.ui.components.cleanHeadingTitle
+import de.luca.dungeon_master_manager.ui.components.extractMarkdownHeadings
 import de.luca.dungeon_master_manager.ui.parseMarkdown
 import de.luca.dungeon_master_manager.ui.replaceEntityQueryWithLink
 import de.luca.dungeonmastermanager.database.Entity
@@ -1002,6 +1004,62 @@ wawdawawdawdawdawwd awd awdwd awdawd awd awd awdwd awdwdadadawdawd awd
         assertEquals(min, (5).coerceIn(min, max))
         assertEquals(max, (50).coerceIn(min, max))
         assertEquals(20, (20).coerceIn(min, max))
+    }
+
+    @Test
+    fun testAppSettings_EntityViewMode() {
+        assertEquals("GRID", AppSettingsRepository.ENTITY_VIEW_MODE_GRID)
+        assertEquals("LIST", AppSettingsRepository.ENTITY_VIEW_MODE_LIST)
+
+        val defaultSettings = de.luca.dungeon_master_manager.data.AppSettings()
+        assertEquals("GRID", defaultSettings.entityViewMode)
+    }
+
+    @Test
+    fun testAppSettings_EditorTimelineVisible() {
+        val defaultSettings = de.luca.dungeon_master_manager.data.AppSettings()
+        assertTrue(defaultSettings.isEditorTimelineVisible)
+    }
+
+    @Test
+    fun testCleanHeadingTitle() {
+        assertEquals("Title", cleanHeadingTitle("**Title**"))
+        assertEquals("Bold & Italic", cleanHeadingTitle("**Bold** & *Italic*"))
+        assertEquals("Underlined Heading", cleanHeadingTitle("__Underlined Heading__"))
+        assertEquals("Meet entity_123", cleanHeadingTitle("Meet @[entity_123]"))
+    }
+
+    @Test
+    fun testExtractMarkdownHeadings() {
+        val markdown = """
+            # Act I: The Journey Begins
+            Some intro text describing the realm.
+            ## Chapter 1: The Crossroads
+            A fork in the ancient forest road.
+            ### Hidden Cave
+            Deep under the roots.
+            # Act II: The Shadows Deepen
+            The darkness grows.
+        """.trimIndent()
+
+        val headings = extractMarkdownHeadings(markdown)
+        assertEquals(4, headings.size)
+
+        assertEquals(1, headings[0].level)
+        assertEquals("Act I: The Journey Begins", headings[0].title)
+        assertEquals(0, headings[0].lineIndex)
+
+        assertEquals(2, headings[1].level)
+        assertEquals("Chapter 1: The Crossroads", headings[1].title)
+        assertEquals(2, headings[1].lineIndex)
+
+        assertEquals(3, headings[2].level)
+        assertEquals("Hidden Cave", headings[2].title)
+        assertEquals(4, headings[2].lineIndex)
+
+        assertEquals(1, headings[3].level)
+        assertEquals("Act II: The Shadows Deepen", headings[3].title)
+        assertEquals(6, headings[3].lineIndex)
     }
 
     @Test

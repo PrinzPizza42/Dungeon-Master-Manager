@@ -19,6 +19,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Toc
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -89,6 +93,9 @@ import de.luca.dungeon_master_manager.data.ProjectRepository
 import de.luca.dungeon_master_manager.ui.components.EntityImageLoader
 import de.luca.dungeon_master_manager.ui.components.rememberEntityImage
 import de.luca.dungeon_master_manager.ui.components.ImagePickerDialog
+import de.luca.dungeon_master_manager.ui.components.MarkdownHeading
+import de.luca.dungeon_master_manager.ui.components.MarkdownTimelineSidebar
+import de.luca.dungeon_master_manager.ui.components.extractMarkdownHeadings
 import java.io.File
 
 @Composable
@@ -123,6 +130,67 @@ fun MarkdownEditor(
     var isImageDialogTriggeredByTyping by remember { mutableStateOf(false) }
     var typingTriggerRange by remember { mutableStateOf<TextRange?>(null) }
     var dismissedTypingTriggerPos by remember { mutableStateOf<Int?>(null) }
+
+    val headings = remember(textFieldValue.text) { extractMarkdownHeadings(textFieldValue.text) }
+    var isTimelineVisible by remember { mutableStateOf(settings.isEditorTimelineVisible) }
+    var editorTextLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    var editorOffsetMapping by remember { mutableStateOf<OffsetMapping?>(null) }
+    val verticalScrollState = rememberScrollState()
+    val density = LocalDensity.current
+
+    val activeHeadingIndex = remember(verticalScrollState.value, headings, editorTextLayout, editorOffsetMapping) {
+        val layout = editorTextLayout
+        val mapping = editorOffsetMapping
+        if (layout == null || mapping == null || headings.isEmpty()) {
+            0
+        } else {
+            val currentScroll = verticalScrollState.value
+            val paddingPx = with(density) { 16.dp.toPx() }
+            var best = 0
+            for (i in headings.indices) {
+                val h = headings[i]
+                val charOffset = h.charOffset.coerceIn(0, textFieldValue.text.length)
+                val transOffset = mapping.originalToTransformed(charOffset)
+                    .coerceIn(0, layout.layoutInput.text.length)
+                val line = layout.getLineForOffset(transOffset)
+                val lineTop = layout.getLineTop(line) + paddingPx
+                if (lineTop <= currentScroll + 35f) {
+                    best = i
+                } else {
+                    break
+                }
+            }
+            best
+        }
+    }
+
+    fun scrollToHeading(heading: MarkdownHeading) {
+        val layout = editorTextLayout
+        val mapping = editorOffsetMapping
+        val paddingPx = with(density) { 16.dp.toPx() }
+
+        if (layout != null && mapping != null) {
+            val charOffset = heading.charOffset.coerceIn(0, textFieldValue.text.length)
+            val transOffset = mapping.originalToTransformed(charOffset)
+                .coerceIn(0, layout.layoutInput.text.length)
+            val lineIndex = layout.getLineForOffset(transOffset)
+            val lineTopPx = layout.getLineTop(lineIndex)
+            val targetScroll = (lineTopPx + paddingPx - 10f).coerceAtLeast(0f).roundToInt()
+            coroutineScope.launch {
+                verticalScrollState.animateScrollTo(targetScroll)
+            }
+        } else {
+            val linesBefore = textFieldValue.text.substring(
+                0,
+                heading.charOffset.coerceIn(0, textFieldValue.text.length)
+            ).count { it == '\n' }
+            val approxLineHeight = with(density) { (fontSize * 1.6f).dp.toPx() }
+            val targetScroll = (linesBefore * approxLineHeight).coerceAtLeast(0f).roundToInt()
+            coroutineScope.launch {
+                verticalScrollState.animateScrollTo(targetScroll)
+            }
+        }
+    }
 
     fun openImagePickerFromToolbar() {
         val sel = textFieldValue.selection
@@ -354,67 +422,155 @@ fun MarkdownEditor(
                     }
                 }
             )
+
+            Spacer(Modifier.width(8.dp))
+
+            OutlinedButton(
+                onClick = {
+                    val next = !isTimelineVisible
+                    isTimelineVisible = next
+                    coroutineScope.launch {
+                        AppSettingsRepository.setEditorTimelineVisible(next)
+                    }
+                },
+                border = BorderStroke(
+                    1.dp,
+                    if (isTimelineVisible) GrimoireColors.GoldPrimary else GrimoireColors.BorderBronze
+                ),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = if (isTimelineVisible) GrimoireColors.GoldPrimary.copy(alpha = 0.16f) else Color.Transparent,
+                    contentColor = if (isTimelineVisible) GrimoireColors.GoldPrimary else GrimoireColors.ParchmentMuted
+                ),
+                shape = RoundedCornerShape(4.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                modifier = Modifier.defaultMinSize(minHeight = 30.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Toc,
+                    contentDescription = "Toggle Timeline",
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(Modifier.width(4.dp))
+                Text("Timeline", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+            }
         }
 
         GrimoireDivider()
 
-        val verticalScrollState = rememberScrollState()
-
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(verticalScrollState)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
+        Row(modifier = Modifier.fillMaxWidth().weight(1f)) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(verticalScrollState)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            focusRequester.requestFocus()
+                        }
+                        .padding(16.dp)
                 ) {
-                    focusRequester.requestFocus()
-                }
-                .padding(16.dp)
-        ) {
-            MarkdownEdit(
-                textFieldValue = textFieldValue,
-                entities = entities,
-                fontSize = fontSize,
-                onFontSizeChange = { newSize ->
-                    coroutineScope.launch {
-                        AppSettingsRepository.setEditorFontSize(newSize)
-                    }
-                },
-                onOpenEntityPopout = onOpenEntityPopout,
-                onOpenImageInTab = onOpenImageInTab,
-                onOpenImagePicker = { openImagePickerFromToolbar() },
-                projectPath = projectPath,
-                focusRequester = focusRequester,
-                onValueChange = { newValue ->
-                    val updatedSelection = expandMarkdownTokenSelection(newValue.text, newValue.selection)
-                    val finalValue = newValue.copy(selection = updatedSelection)
-                    
-                    textFieldValue = finalValue
-                    if (finalValue.text != content) {
-                        onContentChange(finalValue.text)
-                    }
-
-                    if (dismissedTypingTriggerPos != null && finalValue.selection.start != dismissedTypingTriggerPos) {
-                        dismissedTypingTriggerPos = null
-                    }
-
-                    val cursor = finalValue.selection.start
-                    if (finalValue.selection.collapsed && cursor >= 2) {
-                        val textBefore = finalValue.text.substring(0, cursor)
-                        if (textBefore.endsWith("![") && dismissedTypingTriggerPos != cursor) {
-                            val isAlreadyCompleteLink = IMAGE_LINK_REGEX.findAll(finalValue.text).any { cursor in it.range }
-                            if (!isAlreadyCompleteLink) {
-                                isImageDialogTriggeredByTyping = true
-                                typingTriggerRange = TextRange(cursor - 2, cursor)
-                                imageDialogInitialTitle = ""
-                                showImagePickerDialog = true
+                    MarkdownEdit(
+                        textFieldValue = textFieldValue,
+                        entities = entities,
+                        fontSize = fontSize,
+                        onFontSizeChange = { newSize ->
+                            coroutineScope.launch {
+                                AppSettingsRepository.setEditorFontSize(newSize)
                             }
+                        },
+                        onOpenEntityPopout = onOpenEntityPopout,
+                        onOpenImageInTab = onOpenImageInTab,
+                        onOpenImagePicker = { openImagePickerFromToolbar() },
+                        projectPath = projectPath,
+                        focusRequester = focusRequester,
+                        onTextLayoutResult = { layout, mapping ->
+                            editorTextLayout = layout
+                            editorOffsetMapping = mapping
+                        },
+                        onValueChange = { newValue ->
+                            val updatedSelection = expandMarkdownTokenSelection(newValue.text, newValue.selection)
+                            val finalValue = newValue.copy(selection = updatedSelection)
+                            
+                            textFieldValue = finalValue
+                            if (finalValue.text != content) {
+                                onContentChange(finalValue.text)
+                            }
+
+                            if (dismissedTypingTriggerPos != null && finalValue.selection.start != dismissedTypingTriggerPos) {
+                                dismissedTypingTriggerPos = null
+                            }
+
+                            val cursor = finalValue.selection.start
+                            if (finalValue.selection.collapsed && cursor >= 2) {
+                                val textBefore = finalValue.text.substring(0, cursor)
+                                if (textBefore.endsWith("![") && dismissedTypingTriggerPos != cursor) {
+                                    val isAlreadyCompleteLink = IMAGE_LINK_REGEX.findAll(finalValue.text).any { cursor in it.range }
+                                    if (!isAlreadyCompleteLink) {
+                                        isImageDialogTriggeredByTyping = true
+                                        typingTriggerRange = TextRange(cursor - 2, cursor)
+                                        imageDialogInitialTitle = ""
+                                        showImagePickerDialog = true
+                                    }
+                                }
+                            }
+                        },
+                        onFormat = { applyFormat(it) }
+                    )
+                }
+
+                if (!isTimelineVisible && headings.isNotEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 10.dp, end = 4.dp)
+                    ) {
+                        IconButton(
+                            onClick = {
+                                isTimelineVisible = true
+                                coroutineScope.launch { AppSettingsRepository.setEditorTimelineVisible(true) }
+                            },
+                            modifier = Modifier
+                                .size(24.dp)
+                                .background(GrimoireColors.SurfaceCard, RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp))
+                                .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ChevronLeft,
+                                contentDescription = "Show Timeline",
+                                tint = GrimoireColors.GoldPrimary,
+                                modifier = Modifier.size(16.dp)
+                            )
                         }
                     }
-                },
-                onFormat = { applyFormat(it) }
-            )
+                }
+            }
+
+            if (isTimelineVisible) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .width(1.dp)
+                        .background(GrimoireColors.BorderBronze)
+                )
+
+                MarkdownTimelineSidebar(
+                    headings = headings,
+                    activeHeadingIndex = activeHeadingIndex,
+                    onHeadingClick = { heading ->
+                        scrollToHeading(heading)
+                    },
+                    onClose = {
+                        isTimelineVisible = false
+                        coroutineScope.launch { AppSettingsRepository.setEditorTimelineVisible(false) }
+                    }
+                )
+            }
         }
 
         if (showImagePickerDialog) {
@@ -466,7 +622,8 @@ private fun MarkdownEdit(
     onOpenImageInTab: (String) -> Unit,
     onOpenImagePicker: () -> Unit = {},
     projectPath: String,
-    focusRequester: FocusRequester
+    focusRequester: FocusRequester,
+    onTextLayoutResult: ((TextLayoutResult, OffsetMapping) -> Unit)? = null
 ) {
     val primaryColor = GrimoireColors.GoldPrimary
     val fantasyFamily = LocalFantasyFontFamily.current
@@ -494,6 +651,12 @@ private fun MarkdownEdit(
     var lastInsideEntityRange by remember { mutableStateOf<IntRange?>(null) }
     val dropdownListState = rememberLazyListState()
     var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+
+    LaunchedEffect(currentOffsetMapping) {
+        textLayoutResult?.let { layout ->
+            onTextLayoutResult?.invoke(layout, currentOffsetMapping)
+        }
+    }
 
     val displayEntities = remember(dropdownQuery, entities) {
         val q = dropdownQuery
@@ -819,7 +982,10 @@ private fun MarkdownEdit(
                     }
                     onValueChange(newValue)
                 },
-                onTextLayout = { textLayoutResult = it },
+                onTextLayout = {
+                    textLayoutResult = it
+                    onTextLayoutResult?.invoke(it, currentOffsetMapping)
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .focusRequester(focusRequester)

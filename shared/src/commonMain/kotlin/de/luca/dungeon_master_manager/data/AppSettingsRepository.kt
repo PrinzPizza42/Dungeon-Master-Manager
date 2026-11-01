@@ -45,6 +45,9 @@ object AppSettingsRepository {
     const val MIN_EDITOR_FONT_SIZE = 10
     const val MAX_EDITOR_FONT_SIZE = 32
 
+    const val ENTITY_VIEW_MODE_GRID = "GRID"
+    const val ENTITY_VIEW_MODE_LIST = "LIST"
+
     suspend fun setBatterySaverMode(enabled: Boolean) {
         updateSettings { it.copy(isBatterySaverMode = enabled) }
     }
@@ -52,6 +55,15 @@ object AppSettingsRepository {
     suspend fun setEditorFontSize(fontSize: Int) {
         val clamped = fontSize.coerceIn(MIN_EDITOR_FONT_SIZE, MAX_EDITOR_FONT_SIZE)
         updateSettings { it.copy(editorFontSize = clamped) }
+    }
+
+    suspend fun setEntityViewMode(mode: String) {
+        val validMode = if (mode == ENTITY_VIEW_MODE_LIST) ENTITY_VIEW_MODE_LIST else ENTITY_VIEW_MODE_GRID
+        updateSettings { it.copy(entityViewMode = validMode) }
+    }
+
+    suspend fun setEditorTimelineVisible(visible: Boolean) {
+        updateSettings { it.copy(isEditorTimelineVisible = visible) }
     }
 
     suspend fun updateSettings(transform: (AppSettings) -> AppSettings) = withContext(Dispatchers.IO) {

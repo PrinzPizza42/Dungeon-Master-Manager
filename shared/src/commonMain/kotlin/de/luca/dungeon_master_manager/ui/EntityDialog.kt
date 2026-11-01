@@ -7,10 +7,20 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,11 +29,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import de.luca.dungeon_master_manager.colorElement
+import de.luca.dungeon_master_manager.data.AppSettingsRepository
 import de.luca.dungeon_master_manager.data.EntityPopoutRequest
 import de.luca.dungeon_master_manager.ui.components.rememberEntityImage
 import de.luca.dungeon_master_manager.ui.theme.GrimoireCard
@@ -31,7 +43,12 @@ import de.luca.dungeon_master_manager.ui.theme.GrimoireColors
 import de.luca.dungeon_master_manager.ui.theme.GrimoireDivider
 import de.luca.dungeonmastermanager.database.Entity
 import de.luca.dungeon_master_manager.viewmodel.EntityViewModel
+import kotlinx.coroutines.launch
 import java.io.File
+
+enum class EntityViewMode {
+    LIST, GRID
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -44,10 +61,21 @@ fun EntityManagerDialog(
 ) {
     val projectEntities by viewModel.projectEntities.collectAsState()
     val globalEntities by viewModel.globalEntities.collectAsState()
+    val appSettings by AppSettingsRepository.settings.collectAsState()
+    val scope = rememberCoroutineScope()
+
+    val viewMode = remember(appSettings.entityViewMode) {
+        if (appSettings.entityViewMode == AppSettingsRepository.ENTITY_VIEW_MODE_LIST) {
+            EntityViewMode.LIST
+        } else {
+            EntityViewMode.GRID
+        }
+    }
 
     var selectedTab by remember { mutableStateOf(if (isGlobalOnly) 1 else 0) }
     var showCreateDialog by remember { mutableStateOf(false) }
     var entityToEdit by remember { mutableStateOf<Entity?>(null) }
+    var entityToDelete by remember { mutableStateOf<Entity?>(null) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -62,7 +90,7 @@ fun EntityManagerDialog(
             Column(modifier = Modifier.fillMaxSize()) {
                 // Header
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -71,12 +99,44 @@ fun EntityManagerDialog(
                         style = MaterialTheme.typography.titleLarge,
                         color = GrimoireColors.GoldPrimary
                     )
-                    IconButton(onClick = onDismiss) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Close",
-                            tint = GrimoireColors.ParchmentMuted
-                        )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        IconButton(
+                            onClick = {
+                                scope.launch {
+                                    AppSettingsRepository.setEntityViewMode(AppSettingsRepository.ENTITY_VIEW_MODE_LIST)
+                                }
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.List,
+                                contentDescription = "List View",
+                                tint = if (viewMode == EntityViewMode.LIST) GrimoireColors.GoldPrimary else GrimoireColors.ParchmentMuted
+                            )
+                        }
+                        IconButton(
+                            onClick = {
+                                scope.launch {
+                                    AppSettingsRepository.setEntityViewMode(AppSettingsRepository.ENTITY_VIEW_MODE_GRID)
+                                }
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.GridView,
+                                contentDescription = "Gallery View",
+                                tint = if (viewMode == EntityViewMode.GRID) GrimoireColors.GoldPrimary else GrimoireColors.ParchmentMuted
+                            )
+                        }
+                        Spacer(Modifier.width(6.dp))
+                        IconButton(onClick = onDismiss) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close",
+                                tint = GrimoireColors.ParchmentMuted
+                            )
+                        }
                     }
                 }
 
@@ -132,38 +192,81 @@ fun EntityManagerDialog(
                         )
                     } else {
                         val grouped = entitiesToShow.groupBy { it.type }
-                        LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp)) {
-                            grouped.forEach { (type, entities) ->
-                                item {
-                                    Text(
-                                        text = type.uppercase(),
-                                        style = MaterialTheme.typography.titleSmall,
-                                        color = GrimoireColors.GoldPrimary,
-                                        fontWeight = FontWeight.Bold,
-                                        letterSpacing = 1.sp,
-                                        modifier = Modifier.padding(top = 12.dp, bottom = 6.dp)
-                                    )
-                                }
-                                items(entities) { entity ->
-                                    EntityRow(
-                                        entity = entity,
-                                        isGlobal = isShowingGlobal,
-                                        viewModel = viewModel,
-                                        canCopy = !isGlobalOnly,
-                                        onDelete = { viewModel.deleteEntity(isShowingGlobal, entity.id) },
-                                        onCopy = { viewModel.copyEntity(entity, !isShowingGlobal) },
-                                        onEdit = { entityToEdit = it },
-                                        onOpen = if (onOpenEntityPopout != null) {
-                                            {
-                                                onOpenEntityPopout(
-                                                    EntityPopoutRequest(
-                                                        entityName = entity.name,
-                                                        projectPath = if (isShowingGlobal) "" else (projectPath ?: "")
+                        if (viewMode == EntityViewMode.LIST) {
+                            LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp)) {
+                                grouped.forEach { (type, entities) ->
+                                    item {
+                                        Text(
+                                            text = type.uppercase(),
+                                            style = MaterialTheme.typography.titleSmall,
+                                            color = GrimoireColors.GoldPrimary,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 1.sp,
+                                            modifier = Modifier.padding(top = 12.dp, bottom = 6.dp)
+                                        )
+                                    }
+                                    items(entities, key = { it.id }) { entity ->
+                                        EntityRow(
+                                            entity = entity,
+                                            isGlobal = isShowingGlobal,
+                                            viewModel = viewModel,
+                                            canCopy = !isGlobalOnly,
+                                            onDelete = { entityToDelete = entity },
+                                            onCopy = { viewModel.copyEntity(entity, !isShowingGlobal) },
+                                            onEdit = { entityToEdit = it },
+                                            onOpen = if (onOpenEntityPopout != null) {
+                                                {
+                                                    onOpenEntityPopout(
+                                                        EntityPopoutRequest(
+                                                            entityName = entity.name,
+                                                            projectPath = if (isShowingGlobal) "" else (projectPath ?: "")
+                                                        )
                                                     )
-                                                )
-                                            }
-                                        } else null
-                                    )
+                                                }
+                                            } else null
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            LazyVerticalGrid(
+                                columns = GridCells.Adaptive(minSize = 175.dp),
+                                modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                grouped.forEach { (type, entities) ->
+                                    item(span = { GridItemSpan(maxLineSpan) }) {
+                                        Text(
+                                            text = type.uppercase(),
+                                            style = MaterialTheme.typography.titleSmall,
+                                            color = GrimoireColors.GoldPrimary,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 1.sp,
+                                            modifier = Modifier.padding(top = 12.dp, bottom = 6.dp)
+                                        )
+                                    }
+                                    items(entities, key = { it.id }) { entity ->
+                                        EntityGridCard(
+                                            entity = entity,
+                                            isGlobal = isShowingGlobal,
+                                            viewModel = viewModel,
+                                            canCopy = !isGlobalOnly,
+                                            onDelete = { entityToDelete = entity },
+                                            onCopy = { viewModel.copyEntity(entity, !isShowingGlobal) },
+                                            onEdit = { entityToEdit = it },
+                                            onOpen = if (onOpenEntityPopout != null) {
+                                                {
+                                                    onOpenEntityPopout(
+                                                        EntityPopoutRequest(
+                                                            entityName = entity.name,
+                                                            projectPath = if (isShowingGlobal) "" else (projectPath ?: "")
+                                                        )
+                                                    )
+                                                }
+                                            } else null
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -212,6 +315,43 @@ fun EntityManagerDialog(
                 }
                 showCreateDialog = false
                 entityToEdit = null
+            }
+        )
+    }
+
+    if (entityToDelete != null) {
+        val targetEntity = entityToDelete!!
+        AlertDialog(
+            onDismissRequest = { entityToDelete = null },
+            title = {
+                Text("Delete Entity", color = GrimoireColors.CrimsonError, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text(
+                    "Are you sure you want to delete '${targetEntity.name}'? Any associated map markers will also be removed.",
+                    color = GrimoireColors.ParchmentLight
+                )
+            },
+            containerColor = GrimoireColors.SurfaceCard,
+            shape = RoundedCornerShape(8.dp),
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteEntity(selectedTab == 1, targetEntity.id)
+                        entityToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = GrimoireColors.CrimsonError,
+                        contentColor = GrimoireColors.ParchmentLight
+                    )
+                ) {
+                    Text("Delete", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { entityToDelete = null }) {
+                    Text("Cancel", color = GrimoireColors.ParchmentMuted)
+                }
             }
         )
     }
@@ -299,6 +439,168 @@ private fun EntityRow(
                 colors = ButtonDefaults.textButtonColors(contentColor = GrimoireColors.CrimsonError)
             ) {
                 Text("Delete")
+            }
+        }
+    }
+}
+
+@Composable
+private fun EntityGridCard(
+    entity: Entity,
+    isGlobal: Boolean,
+    viewModel: EntityViewModel,
+    canCopy: Boolean,
+    onDelete: (Entity) -> Unit,
+    onCopy: (Entity) -> Unit,
+    onEdit: (Entity) -> Unit,
+    onOpen: (() -> Unit)? = null
+) {
+    val colorVal = try {
+        Color(entity.color?.toULong() ?: 0xFFFFFFFFuL)
+    } catch (_: Exception) {
+        GrimoireColors.GoldPrimary
+    }
+    val imageFile = remember(entity.imageFilePath, isGlobal) {
+        viewModel.resolveEntityImageFile(entity.imageFilePath, isGlobal)
+    }
+    val imageBitmap = rememberEntityImage(imageFile)
+
+    val cardClickAction: () -> Unit = onOpen ?: { onEdit(entity) }
+
+    GrimoireCard(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = cardClickAction,
+        shape = RoundedCornerShape(8.dp),
+        borderHoverColor = GrimoireColors.GoldPrimary
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            // Portrait / Monogram Token Box
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(140.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(GrimoireColors.SurfaceLow)
+                    .border(1.5.dp, colorVal, RoundedCornerShape(6.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                if (imageBitmap != null) {
+                    Image(
+                        bitmap = imageBitmap,
+                        contentDescription = entity.name,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(CircleShape)
+                            .background(colorVal.copy(alpha = 0.2f))
+                            .border(2.dp, colorVal, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = entity.name.trim().take(1).uppercase().ifBlank { "?" },
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = colorVal
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // Name
+            Text(
+                text = entity.name,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+                color = GrimoireColors.ParchmentLight,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(Modifier.height(4.dp))
+
+            // Type Badge & Notes Indicator
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .background(colorVal.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+                        .border(0.5.dp, colorVal.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = entity.type.uppercase(),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colorVal
+                    )
+                }
+
+                if (!entity.notesFilePath.isNullOrBlank()) {
+                    Text(
+                        text = "📝 Note",
+                        fontSize = 10.sp,
+                        color = GrimoireColors.ParchmentMuted,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+            GrimoireDivider(thickness = 0.5.dp, color = GrimoireColors.BorderBronze.copy(alpha = 0.35f))
+            Spacer(Modifier.height(4.dp))
+
+            // Action Icons: Edit, Copy, Delete
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = { onEdit(entity) },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = "Edit",
+                        tint = GrimoireColors.GoldPrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
+                if (canCopy) {
+                    IconButton(
+                        onClick = { onCopy(entity) },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = if (isGlobal) "Copy to Campaign" else "Copy to Global",
+                            tint = GrimoireColors.ParchmentLight,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+
+                IconButton(
+                    onClick = { onDelete(entity) },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Delete",
+                        tint = GrimoireColors.CrimsonError,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
             }
         }
     }
