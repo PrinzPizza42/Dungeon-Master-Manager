@@ -1,5 +1,14 @@
 package de.luca.dungeon_master_manager.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -12,8 +21,11 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -26,6 +38,7 @@ import androidx.compose.ui.draganddrop.DragAndDropTransferAction
 import androidx.compose.ui.draganddrop.DragAndDropTransferData
 import androidx.compose.ui.draganddrop.DragAndDropTransferable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerButton
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -106,12 +119,17 @@ private fun FileTreeNodeRow(
     val isHovered by interactionSource.collectIsHoveredAsState()
     var showMenu by remember { mutableStateOf(false) }
 
-    val backgroundColor = when {
+    val targetBackgroundColor = when {
         isDropTargetHovered -> GrimoireColors.GoldContainer.copy(alpha = 0.55f)
         isActive -> GrimoireColors.GoldContainer.copy(alpha = 0.45f)
         isHovered -> GrimoireColors.SurfaceHover
         else -> Color.Transparent
     }
+    val backgroundColor by animateColorAsState(
+        targetValue = targetBackgroundColor,
+        animationSpec = tween(durationMillis = 150),
+        label = "FileTreeItemBgColor"
+    )
 
     val icon = when {
         node.isDirectory && isExpanded -> "📂"
@@ -218,6 +236,25 @@ private fun FileTreeNodeRow(
                     Spacer(Modifier.width(4.dp))
                 }
 
+                if (node.isDirectory) {
+                    val chevronRotation by animateFloatAsState(
+                        targetValue = if (isExpanded) 90f else 0f,
+                        animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+                        label = "FileTreeChevronRotation"
+                    )
+                    Icon(
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = if (isExpanded) "Collapse" else "Expand",
+                        tint = if (isHovered || isActive) GrimoireColors.GoldPrimary else GrimoireColors.ParchmentMuted,
+                        modifier = Modifier
+                            .size(14.dp)
+                            .graphicsLayer { rotationZ = chevronRotation }
+                    )
+                    Spacer(Modifier.width(4.dp))
+                } else {
+                    Spacer(Modifier.width(18.dp))
+                }
+
                 Text(
                     text = icon,
                     style = MaterialTheme.typography.bodyMedium,
@@ -280,24 +317,36 @@ private fun FileTreeNodeRow(
             }
         }
 
-        // Render children if expanded
-        if (node.isDirectory && isExpanded) {
-            for (child in node.children) {
-                FileTreeNodeRow(
-                    node = child,
-                    depth = depth + 1,
-                    expandedPaths = expandedPaths,
-                    activeFilePath = activeFilePath,
-                    hoveredDropFolderPath = hoveredDropFolderPath,
-                    onDropTargetHoverChange = onDropTargetHoverChange,
-                    onPayloadDropped = onPayloadDropped,
-                    onDragTransferCompleted = onDragTransferCompleted,
-                    onNodeClick = onNodeClick,
-                    onRenameClick = onRenameClick,
-                    onMoveClick = onMoveClick,
-                    onDeleteClick = onDeleteClick,
-                    onPopOutClick = onPopOutClick,
-                )
+        // Render children with smooth accordion animation
+        AnimatedVisibility(
+            visible = node.isDirectory && isExpanded,
+            enter = expandVertically(
+                animationSpec = tween(180, easing = FastOutSlowInEasing),
+                expandFrom = Alignment.Top
+            ) + fadeIn(animationSpec = tween(140)),
+            exit = shrinkVertically(
+                animationSpec = tween(160, easing = FastOutSlowInEasing),
+                shrinkTowards = Alignment.Top
+            ) + fadeOut(animationSpec = tween(120))
+        ) {
+            Column {
+                for (child in node.children) {
+                    FileTreeNodeRow(
+                        node = child,
+                        depth = depth + 1,
+                        expandedPaths = expandedPaths,
+                        activeFilePath = activeFilePath,
+                        hoveredDropFolderPath = hoveredDropFolderPath,
+                        onDropTargetHoverChange = onDropTargetHoverChange,
+                        onPayloadDropped = onPayloadDropped,
+                        onDragTransferCompleted = onDragTransferCompleted,
+                        onNodeClick = onNodeClick,
+                        onRenameClick = onRenameClick,
+                        onMoveClick = onMoveClick,
+                        onDeleteClick = onDeleteClick,
+                        onPopOutClick = onPopOutClick,
+                    )
+                }
             }
         }
     }

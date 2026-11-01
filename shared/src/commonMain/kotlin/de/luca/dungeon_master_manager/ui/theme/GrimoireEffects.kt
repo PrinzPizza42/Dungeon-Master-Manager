@@ -7,6 +7,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -150,8 +152,24 @@ fun GrimoireAmbientChamber(
     zoomScale: Float = 1.0f,
     panOffsetProvider: (() -> Offset)? = null,
     zoomScaleProvider: (() -> Float)? = null,
+    enableCandleFlicker: Boolean = true,
     content: @Composable BoxScope.() -> Unit = {}
 ) {
+    val candleAlpha by if (enableCandleFlicker) {
+        val infiniteTransition = rememberInfiniteTransition(label = "WarTableCandleFlicker")
+        infiniteTransition.animateFloat(
+            initialValue = 0.84f,
+            targetValue = 1.06f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(2200, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "CandleFlickerAlpha"
+        )
+    } else {
+        remember { mutableStateOf(1.0f) }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -168,7 +186,7 @@ fun GrimoireAmbientChamber(
             .drawWithCache {
                 val centerOffset = Offset(size.width / 2f, size.height / 2f)
 
-                // 1. Warm Candlelight Pool (Static atmospheric light, 0% idle GPU load)
+                // 1. Warm Candlelight Pool (Atmospheric breathing light, 0% CPU overhead)
                 val candleRadius = (size.minDimension * 0.78f).coerceAtLeast(350f)
                 val candleBrush = Brush.radialGradient(
                     colorStops = arrayOf(
@@ -195,7 +213,7 @@ fun GrimoireAmbientChamber(
 
                 onDrawWithContent {
                     drawContent()
-                    drawRect(brush = candleBrush, blendMode = BlendMode.Screen)
+                    drawRect(brush = candleBrush, blendMode = BlendMode.Screen, alpha = candleAlpha)
                     drawRect(brush = roomBrush)
                 }
             },

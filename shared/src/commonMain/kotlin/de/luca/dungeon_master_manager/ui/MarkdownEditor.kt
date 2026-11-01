@@ -1,5 +1,12 @@
 package de.luca.dungeon_master_manager.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ContextMenuDataProvider
 import androidx.compose.foundation.ContextMenuItem
@@ -524,52 +531,65 @@ fun MarkdownEditor(
                     )
                 }
 
-                if (!isTimelineVisible && headings.isNotEmpty()) {
-                    Box(
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = !isTimelineVisible && headings.isNotEmpty(),
+                    enter = fadeIn(animationSpec = tween(150, delayMillis = 80)),
+                    exit = fadeOut(animationSpec = tween(100)),
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 10.dp, end = 4.dp)
+                ) {
+                    IconButton(
+                        onClick = {
+                            isTimelineVisible = true
+                            coroutineScope.launch { AppSettingsRepository.setEditorTimelineVisible(true) }
+                        },
                         modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(top = 10.dp, end = 4.dp)
+                            .size(24.dp)
+                            .background(GrimoireColors.SurfaceCard, RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp))
+                            .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp))
                     ) {
-                        IconButton(
-                            onClick = {
-                                isTimelineVisible = true
-                                coroutineScope.launch { AppSettingsRepository.setEditorTimelineVisible(true) }
-                            },
-                            modifier = Modifier
-                                .size(24.dp)
-                                .background(GrimoireColors.SurfaceCard, RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp))
-                                .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp))
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ChevronLeft,
-                                contentDescription = "Show Timeline",
-                                tint = GrimoireColors.GoldPrimary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.Default.ChevronLeft,
+                            contentDescription = "Show Timeline",
+                            tint = GrimoireColors.GoldPrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
                     }
                 }
             }
 
-            if (isTimelineVisible) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .width(1.dp)
-                        .background(GrimoireColors.BorderBronze)
-                )
+            AnimatedVisibility(
+                visible = isTimelineVisible,
+                enter = expandHorizontally(
+                    animationSpec = tween(190, easing = FastOutSlowInEasing),
+                    expandFrom = Alignment.End
+                ) + fadeIn(animationSpec = tween(140)),
+                exit = shrinkHorizontally(
+                    animationSpec = tween(180, easing = FastOutSlowInEasing),
+                    shrinkTowards = Alignment.End
+                ) + fadeOut(animationSpec = tween(120))
+            ) {
+                Row(modifier = Modifier.fillMaxHeight()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .width(1.dp)
+                            .background(GrimoireColors.BorderBronze)
+                    )
 
-                MarkdownTimelineSidebar(
-                    headings = headings,
-                    activeHeadingIndex = activeHeadingIndex,
-                    onHeadingClick = { heading ->
-                        scrollToHeading(heading)
-                    },
-                    onClose = {
-                        isTimelineVisible = false
-                        coroutineScope.launch { AppSettingsRepository.setEditorTimelineVisible(false) }
-                    }
-                )
+                    MarkdownTimelineSidebar(
+                        headings = headings,
+                        activeHeadingIndex = activeHeadingIndex,
+                        onHeadingClick = { heading ->
+                            scrollToHeading(heading)
+                        },
+                        onClose = {
+                            isTimelineVisible = false
+                            coroutineScope.launch { AppSettingsRepository.setEditorTimelineVisible(false) }
+                        }
+                    )
+                }
             }
         }
 

@@ -1,5 +1,11 @@
 package de.luca.dungeon_master_manager.ui.map
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -34,6 +40,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import de.luca.dungeon_master_manager.data.AppSettingsRepository
 import de.luca.dungeon_master_manager.data.MapMarker
 import de.luca.dungeon_master_manager.ui.components.EntityImageLoader
 import de.luca.dungeon_master_manager.ui.components.rememberEntityImage
@@ -79,6 +86,24 @@ fun MapMarkersCanvas(
     val baseRadiusPx = baseMarkerSizePx / 2f
     val baseTokenSizePx = with(density) { 29.dp.toPx() }
     val baseTokenRadiusPx = baseTokenSizePx / 2f
+
+    val appSettings by AppSettingsRepository.settings.collectAsState()
+    val isBatterySaver = appSettings.isBatterySaverMode
+
+    val infiniteTransition = rememberInfiniteTransition(label = "MarkerHaloPulse")
+    val pulseFraction by if (!isBatterySaver) {
+        infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1100, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "MarkerHaloFraction"
+        )
+    } else {
+        remember { mutableStateOf(0.35f) }
+    }
 
     // O(1) Entity Map
     val entityById = remember(projectEntities, globalEntities) {
@@ -273,6 +298,31 @@ fun MapMarkersCanvas(
             for (r in renderDataList) {
                 val cx = r.marker.x * mapWidthPx
                 val cy = r.marker.y * mapHeightPx
+
+                val isFocused = hoveredMarker?.marker?.id == r.marker.id || contextMenuMarker?.marker?.id == r.marker.id
+                if (isFocused) {
+                    val baseTargetRadius = if (r.tokenBitmap != null) {
+                        (baseTokenSizePx * markerAdaptiveScale) / 2f
+                    } else {
+                        currentRadius
+                    }
+                    val haloRadius = baseTargetRadius + (3.5f + 5f * pulseFraction) * markerAdaptiveScale
+                    val haloAlpha = (0.25f + 0.35f * (1f - pulseFraction)).coerceIn(0.1f, 0.7f)
+
+                    // Soft ambient gold fill
+                    drawCircle(
+                        color = GrimoireColors.GoldContainer.copy(alpha = haloAlpha * 0.35f),
+                        radius = haloRadius,
+                        center = Offset(cx, cy)
+                    )
+                    // Pulsing gold halo border
+                    drawCircle(
+                        color = GrimoireColors.GoldPrimary.copy(alpha = haloAlpha),
+                        radius = haloRadius,
+                        center = Offset(cx, cy),
+                        style = Stroke(width = (2.2f * markerAdaptiveScale).coerceIn(1.2f, 4f))
+                    )
+                }
 
                 if (r.tokenBitmap != null) {
                     val tokenSize = baseTokenSizePx * markerAdaptiveScale

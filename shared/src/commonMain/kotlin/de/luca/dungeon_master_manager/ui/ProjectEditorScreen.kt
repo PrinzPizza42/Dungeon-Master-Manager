@@ -1,5 +1,12 @@
 package de.luca.dungeon_master_manager.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.*
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.layout.*
@@ -151,44 +158,56 @@ fun ProjectEditorScreen(
 
         // Main content: sidebar + editor
         Row(modifier = Modifier.fillMaxSize()) {
-            // Sidebar
-            if (isExplorerVisible) {
-                EditorSidebar(
-                    fileTree = fileTree,
-                    expandedPaths = expandedPaths,
-                    activeFilePath = activeTabPath,
-                    projectPath = viewModel.project.path,
-                    dropNotice = dropNotice,
-                    onDismissDropNotice = { viewModel.dismissDropNotice() },
-                    onNodeClick = { viewModel.openFile(it) },
-                    onCreateFile = { folder, file -> viewModel.createNewFile(folder, file) },
-                    onRenameFile = { node, newName -> viewModel.renameFile(node, newName) },
-                    onMoveFile = { node, folder -> viewModel.moveFile(node, folder) },
-                    onDeleteFile = { node -> viewModel.deleteFile(node) },
-                    onPopOutClick = { node -> viewModel.openAsWindow(node) },
-                    onExternalFilesDropped = { files, targetDir -> viewModel.importExternalFiles(files, targetDir) },
-                    onInternalFileMoved = { sourcePath, targetDir -> viewModel.moveInternalFile(sourcePath, targetDir) },
-                    onDragTransferCompleted = { filePath -> viewModel.onDragTransferCompleted(filePath) },
-                    onOpenNativeExplorer = {
-                        try {
-                            val file = java.io.File(viewModel.project.path)
-                            if (java.awt.Desktop.isDesktopSupported()) {
-                                java.awt.Desktop.getDesktop().open(file)
+            // Sidebar with smooth horizontal slide
+            AnimatedVisibility(
+                visible = isExplorerVisible,
+                enter = expandHorizontally(
+                    animationSpec = tween(190, easing = FastOutSlowInEasing),
+                    expandFrom = Alignment.Start
+                ) + fadeIn(animationSpec = tween(140)),
+                exit = shrinkHorizontally(
+                    animationSpec = tween(180, easing = FastOutSlowInEasing),
+                    shrinkTowards = Alignment.Start
+                ) + fadeOut(animationSpec = tween(120))
+            ) {
+                Row(modifier = Modifier.width(260.dp).fillMaxHeight()) {
+                    EditorSidebar(
+                        fileTree = fileTree,
+                        expandedPaths = expandedPaths,
+                        activeFilePath = activeTabPath,
+                        projectPath = viewModel.project.path,
+                        dropNotice = dropNotice,
+                        onDismissDropNotice = { viewModel.dismissDropNotice() },
+                        onNodeClick = { viewModel.openFile(it) },
+                        onCreateFile = { folder, file -> viewModel.createNewFile(folder, file) },
+                        onRenameFile = { node, newName -> viewModel.renameFile(node, newName) },
+                        onMoveFile = { node, folder -> viewModel.moveFile(node, folder) },
+                        onDeleteFile = { node -> viewModel.deleteFile(node) },
+                        onPopOutClick = { node -> viewModel.openAsWindow(node) },
+                        onExternalFilesDropped = { files, targetDir -> viewModel.importExternalFiles(files, targetDir) },
+                        onInternalFileMoved = { sourcePath, targetDir -> viewModel.moveInternalFile(sourcePath, targetDir) },
+                        onDragTransferCompleted = { filePath -> viewModel.onDragTransferCompleted(filePath) },
+                        onOpenNativeExplorer = {
+                            try {
+                                val file = java.io.File(viewModel.project.path)
+                                if (java.awt.Desktop.isDesktopSupported()) {
+                                    java.awt.Desktop.getDesktop().open(file)
+                                }
+                            } catch (e: Exception) {
+                                e.printStackTrace()
                             }
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                        }
-                    },
-                    onManageEntities = { showEntityDialog = true },
-                    onToggleCollapse = { toggleExplorer() },
-                    modifier = Modifier.width(260.dp).fillMaxHeight(),
-                )
+                        },
+                        onManageEntities = { showEntityDialog = true },
+                        onToggleCollapse = { toggleExplorer() },
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                    )
 
-                VerticalDivider(color = GrimoireColors.BorderBronze)
+                    VerticalDivider(color = GrimoireColors.BorderBronze)
+                }
             }
 
             // Content Area (Active tab or Empty state)
-            Box(modifier = Modifier.fillMaxSize()) {
+            Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
                 if (openTabs.isNotEmpty()) {
                     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                         ContentArea(
@@ -238,26 +257,27 @@ fun ProjectEditorScreen(
                 }
 
                 // Docked Flap to Show Explorer when hidden (mirroring Timeline Sidebar flap)
-                if (!isExplorerVisible) {
-                    Box(
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = !isExplorerVisible,
+                    enter = fadeIn(animationSpec = tween(150, delayMillis = 80)),
+                    exit = fadeOut(animationSpec = tween(100)),
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(top = 48.dp, start = 0.dp)
+                ) {
+                    IconButton(
+                        onClick = { toggleExplorer() },
                         modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(top = 48.dp, start = 0.dp)
+                            .size(24.dp)
+                            .background(GrimoireColors.SurfaceCard, RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp))
+                            .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp))
                     ) {
-                        IconButton(
-                            onClick = { toggleExplorer() },
-                            modifier = Modifier
-                                .size(24.dp)
-                                .background(GrimoireColors.SurfaceCard, RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp))
-                                .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp))
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ChevronRight,
-                                contentDescription = "Show Explorer",
-                                tint = GrimoireColors.GoldPrimary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.Default.ChevronRight,
+                            contentDescription = "Show Explorer",
+                            tint = GrimoireColors.GoldPrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
                     }
                 }
             }

@@ -1,5 +1,9 @@
 package de.luca.dungeon_master_manager.ui.components
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -10,8 +14,10 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -71,7 +77,11 @@ fun EditorUnifiedTopBar(
             .background(GrimoireColors.SurfaceLow)
     ) {
         // --- Left Section: Navigation & Campaign Name (Width: 260dp matching Explorer sidebar when visible) ---
-        val leftSectionWidth = if (isExplorerVisible) 260.dp else 220.dp
+        val leftSectionWidth by animateDpAsState(
+            targetValue = if (isExplorerVisible) 260.dp else 220.dp,
+            animationSpec = tween(durationMillis = 190, easing = FastOutSlowInEasing),
+            label = "LeftSectionWidth"
+        )
         Row(
             modifier = Modifier
                 .align(Alignment.CenterStart)
@@ -136,21 +146,31 @@ fun EditorUnifiedTopBar(
             }
         }
 
-        // Vertical divider at 260dp lining up exactly with the sidebar divider if visible
-        if (isExplorerVisible) {
+        // Vertical divider lining up exactly with the sidebar divider if visible
+        val dividerAlpha by animateFloatAsState(
+            targetValue = if (isExplorerVisible) 1f else 0f,
+            animationSpec = tween(durationMillis = 180),
+            label = "TopBarDividerAlpha"
+        )
+        if (dividerAlpha > 0.01f) {
             Box(
                 modifier = Modifier
                     .align(Alignment.CenterStart)
-                    .offset(x = 260.dp)
+                    .offset(x = leftSectionWidth)
                     .width(1.dp)
                     .fillMaxHeight()
+                    .graphicsLayer { alpha = dividerAlpha }
                     .background(GrimoireColors.BorderBronze)
             )
         }
 
         // --- Middle Section: Tabs + Draggable Area ---
-        // Padded on left to start right after the sidebar divider (or left section if sidebar is hidden)
-        val tabsStartPadding = if (isExplorerVisible) 261.dp else (leftSectionWidth + 6.dp)
+        val targetTabsStartPadding = if (isExplorerVisible) 261.dp else (220.dp + 6.dp)
+        val tabsStartPadding by animateDpAsState(
+            targetValue = targetTabsStartPadding,
+            animationSpec = tween(durationMillis = 190, easing = FastOutSlowInEasing),
+            label = "TabsStartPadding"
+        )
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
@@ -168,6 +188,7 @@ fun EditorUnifiedTopBar(
                     // Scrollable row of open file tabs, taking only the width it needs up to maxTabsWidth
                     LazyRow(
                         modifier = Modifier
+                            .fillMaxHeight()
                             .widthIn(max = maxTabsWidth)
                             .wrapContentWidth(),
                         verticalAlignment = Alignment.CenterVertically
@@ -179,6 +200,7 @@ fun EditorUnifiedTopBar(
                                 onSelect = { onTabSelect(tab.filePath) },
                                 onClose = { onTabClose(tab.filePath) },
                                 onPopOut = { onTabPopOut(tab.filePath) },
+                                modifier = Modifier.animateItem().fillMaxHeight(),
                             )
                         }
                     }

@@ -1,5 +1,9 @@
 package de.luca.dungeon_master_manager.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
@@ -20,6 +24,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -55,6 +60,7 @@ fun TabBar(
                     onSelect = { onTabSelect(tab.filePath) },
                     onClose = { onTabClose(tab.filePath) },
                     onPopOut = { onTabPopOut(tab.filePath) },
+                    modifier = Modifier.animateItem(),
                 )
             }
         }
@@ -74,25 +80,50 @@ internal fun TabItem(
     onSelect: () -> Unit,
     onClose: () -> Unit,
     onPopOut: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isHovered by interactionSource.collectIsHoveredAsState()
 
-    val backgroundColor = when {
+    val targetBackgroundColor = when {
         isActive -> GrimoireColors.SurfaceCard
         isHovered -> GrimoireColors.SurfaceHover
         else -> GrimoireColors.SurfaceLow
     }
+    val backgroundColor by animateColorAsState(
+        targetValue = targetBackgroundColor,
+        animationSpec = tween(durationMillis = 150),
+        label = "TabBgColor"
+    )
+
+    val targetTextColor = when {
+        isActive -> GrimoireColors.ParchmentLight
+        isHovered -> GrimoireColors.GoldBright
+        else -> GrimoireColors.ParchmentMuted
+    }
+    val textColor by animateColorAsState(
+        targetValue = targetTextColor,
+        animationSpec = tween(durationMillis = 150),
+        label = "TabTextColor"
+    )
+
+    val indicatorAlpha by animateFloatAsState(
+        targetValue = if (isActive) 1f else 0f,
+        animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing),
+        label = "TabIndicatorAlpha"
+    )
 
     Box(
-        modifier = Modifier
+        modifier = modifier
+            .fillMaxHeight()
             .hoverable(interactionSource)
             .clickable(onClick = onSelect)
             .background(backgroundColor)
     ) {
         Row(
             modifier = Modifier
-                .padding(start = 10.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+                .fillMaxHeight()
+                .padding(start = 10.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // Open as window button
@@ -112,11 +143,7 @@ internal fun TabItem(
                 text = tab.fileName,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
-                color = when {
-                    isActive -> GrimoireColors.ParchmentLight
-                    isHovered -> GrimoireColors.GoldBright
-                    else -> GrimoireColors.ParchmentMuted
-                },
+                color = textColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.widthIn(max = 160.dp),
@@ -137,12 +164,13 @@ internal fun TabItem(
         }
 
         // Active bottom gold accent indicator
-        if (isActive) {
+        if (indicatorAlpha > 0.01f) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(2.dp)
                     .align(Alignment.BottomCenter)
+                    .graphicsLayer { alpha = indicatorAlpha }
                     .background(GrimoireColors.GoldPrimary)
             )
         }

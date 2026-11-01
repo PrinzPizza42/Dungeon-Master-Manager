@@ -1,5 +1,8 @@
 package de.luca.dungeon_master_manager.ui
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -65,49 +68,55 @@ fun ContentArea(
             }
 
             else -> {
-                // Use viewer based on file extension
-                when {
-                    FileExtensions.isMarkdown(activeTab.extension) -> key(activeTab.filePath) {
-                        MarkdownEditor(
-                            content = fileContent ?: "",
-                            onContentChange = onContentChange,
-                            modifier = Modifier.fillMaxSize(),
-                            onOpenEntityPopout = onOpenEntityPopout,
-                            onOpenImageInTab = onOpenImageInTab,
-                            projectPath = projectPath,
-                            entities = entities
-                        )
-                    }
-                    FileExtensions.isMap(activeTab.extension) -> key(activeTab.filePath) {
-                        MapViewer(
-                            projectPath = projectPath,
-                            content = fileContent ?: "",
-                            onContentChange = onContentChange,
-                            onOpenEntityPopout = onOpenEntityPopout
-                        )
-                    }
-                    FileExtensions.isImage(activeTab.extension) -> key(activeTab.filePath) {
-                        ImageViewer(
-                            filePath = activeTab.filePath,
-                            fileName = activeTab.fileName,
-                            modifier = Modifier.fillMaxSize(),
-                            projectPath = projectPath
-                        )
-                    }
-                    FileExtensions.isText(activeTab.extension) -> key(activeTab.filePath) {
-                        PlainTextEditor(
-                            content = fileContent ?: "",
-                            onContentChange = onContentChange,
-                            fileName = activeTab.fileName,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-                    else -> key(activeTab.filePath) {
-                        ExternalFileContentView(
-                            filePath = activeTab.filePath,
-                            fileName = activeTab.fileName,
-                            modifier = Modifier.fillMaxSize()
-                        )
+                // Use viewer based on file extension with smooth crossfade
+                Crossfade(
+                    targetState = activeTab.filePath,
+                    animationSpec = tween(durationMillis = 130, easing = FastOutSlowInEasing),
+                    label = "ContentAreaCrossfade"
+                ) { _ ->
+                    when {
+                        FileExtensions.isMarkdown(activeTab.extension) -> key(activeTab.filePath) {
+                            MarkdownEditor(
+                                content = fileContent ?: "",
+                                onContentChange = onContentChange,
+                                modifier = Modifier.fillMaxSize(),
+                                onOpenEntityPopout = onOpenEntityPopout,
+                                onOpenImageInTab = onOpenImageInTab,
+                                projectPath = projectPath,
+                                entities = entities
+                            )
+                        }
+                        FileExtensions.isMap(activeTab.extension) -> key(activeTab.filePath) {
+                            MapViewer(
+                                projectPath = projectPath,
+                                content = fileContent ?: "",
+                                onContentChange = onContentChange,
+                                onOpenEntityPopout = onOpenEntityPopout
+                            )
+                        }
+                        FileExtensions.isImage(activeTab.extension) -> key(activeTab.filePath) {
+                            ImageViewer(
+                                filePath = activeTab.filePath,
+                                fileName = activeTab.fileName,
+                                modifier = Modifier.fillMaxSize(),
+                                projectPath = projectPath
+                            )
+                        }
+                        FileExtensions.isText(activeTab.extension) -> key(activeTab.filePath) {
+                            PlainTextEditor(
+                                content = fileContent ?: "",
+                                onContentChange = onContentChange,
+                                fileName = activeTab.fileName,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                        else -> key(activeTab.filePath) {
+                            ExternalFileContentView(
+                                filePath = activeTab.filePath,
+                                fileName = activeTab.fileName,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
                     }
                 }
             }

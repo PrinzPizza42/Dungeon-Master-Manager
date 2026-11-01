@@ -52,7 +52,10 @@ fun ProjectLauncherScreen(
 
     if (!appSettings.isBatterySaverMode) {
         // FULL WAR ROOM ATMOSPHERE MODE
-        GrimoireAmbientChamber(modifier = Modifier.fillMaxSize()) {
+        GrimoireAmbientChamber(
+            modifier = Modifier.fillMaxSize(),
+            enableCandleFlicker = !appSettings.isBatterySaverMode
+        ) {
             BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxSize()
