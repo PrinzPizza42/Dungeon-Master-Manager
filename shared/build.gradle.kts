@@ -40,3 +40,7 @@ sqldelight {
         }
     }
 }
+
+tasks.withType<Test> {
+    systemProperty("java.awt.headless", "true")
+}

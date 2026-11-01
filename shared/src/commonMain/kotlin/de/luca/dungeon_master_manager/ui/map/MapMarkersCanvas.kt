@@ -128,9 +128,9 @@ fun MapMarkersCanvas(
                 val ent = entityById[marker.entityId]
                 if (ent != null) {
                     val imgFile = EntityImageLoader.resolveEntityImageFile(ent, projectPath)
-                    if (imgFile != null && EntityImageLoader.getImageSync(imgFile) == null) {
+                    if (imgFile != null && EntityImageLoader.getImageSync(imgFile, maxDimension = 128) == null) {
                         launch(Dispatchers.IO) {
-                            EntityImageLoader.loadImage(imgFile)
+                            EntityImageLoader.loadImage(imgFile, maxDimension = 128)
                             iconsLoadedTrigger++
                         }
                     }
@@ -168,7 +168,7 @@ fun MapMarkersCanvas(
             val iconBmp = marker.iconFileName?.let { MarkerIconCache.getIconSync(it) }
             val tokenBmp = if (marker.iconFileName.isNullOrBlank() && linkedEnt != null) {
                 val imgFile = EntityImageLoader.resolveEntityImageFile(linkedEnt, projectPath)
-                EntityImageLoader.getImageSync(imgFile)
+                EntityImageLoader.getImageSync(imgFile, maxDimension = 128)
             } else null
 
             val labelText = if (marker.isEntityLinked) entityName else marker.title

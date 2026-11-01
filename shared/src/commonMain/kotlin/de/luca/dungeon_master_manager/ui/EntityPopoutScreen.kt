@@ -160,7 +160,7 @@ fun EntityPopoutScreen(
                             val headerImageFile = remember(entity.imageFilePath, isGlobalEntity) {
                                 viewModel.resolveEntityImageFile(entity.imageFilePath, isGlobalEntity)
                             }
-                            val headerImageBitmap = rememberEntityImage(headerImageFile)
+                            val headerImageBitmap = rememberEntityImage(headerImageFile, maxDimension = 128)
 
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -182,7 +182,8 @@ fun EntityPopoutScreen(
                                             bitmap = headerImageBitmap,
                                             contentDescription = entity.name,
                                             modifier = Modifier.fillMaxSize(),
-                                            contentScale = ContentScale.Crop
+                                            contentScale = ContentScale.Crop,
+                                            alignment = Alignment.TopCenter
                                         )
                                     } else {
                                         Box(
@@ -381,7 +382,7 @@ fun EntityPopoutScreen(
                         val imageFile = remember(entity.imageFilePath, isGlobalEntity) {
                             viewModel.resolveEntityImageFile(entity.imageFilePath, isGlobalEntity)
                         }
-                        val imageBitmap = rememberEntityImage(imageFile)
+                        val imageBitmap = rememberEntityImage(imageFile, maxDimension = 1600)
 
                         Box(modifier = Modifier.weight(1f).fillMaxSize(), contentAlignment = Alignment.Center) {
                             if (imageBitmap != null) {

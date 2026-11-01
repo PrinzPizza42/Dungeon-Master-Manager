@@ -381,7 +381,7 @@ private fun EntityRow(
             val imageFile = remember(entity.imageFilePath, isGlobal) {
                 viewModel.resolveEntityImageFile(entity.imageFilePath, isGlobal)
             }
-            val imageBitmap = rememberEntityImage(imageFile)
+            val imageBitmap = rememberEntityImage(imageFile, maxDimension = 128)
 
             if (imageBitmap != null) {
                 Box(
@@ -394,6 +394,7 @@ private fun EntityRow(
                         bitmap = imageBitmap,
                         contentDescription = entity.name,
                         contentScale = ContentScale.Crop,
+                        alignment = Alignment.TopCenter,
                         modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(4.dp))
                     )
                 }
@@ -463,7 +464,7 @@ private fun EntityGridCard(
     val imageFile = remember(entity.imageFilePath, isGlobal) {
         viewModel.resolveEntityImageFile(entity.imageFilePath, isGlobal)
     }
-    val imageBitmap = rememberEntityImage(imageFile)
+    val imageBitmap = rememberEntityImage(imageFile, maxDimension = 512)
 
     val cardClickAction: () -> Unit = onOpen ?: { onEdit(entity) }
 
@@ -478,7 +479,7 @@ private fun EntityGridCard(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(140.dp)
+                    .aspectRatio(0.82f)
                     .clip(RoundedCornerShape(6.dp))
                     .background(GrimoireColors.SurfaceLow)
                     .border(1.5.dp, colorVal, RoundedCornerShape(6.dp)),
@@ -489,12 +490,13 @@ private fun EntityGridCard(
                         bitmap = imageBitmap,
                         contentDescription = entity.name,
                         modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
+                        contentScale = ContentScale.Crop,
+                        alignment = Alignment.TopCenter
                     )
                 } else {
                     Box(
                         modifier = Modifier
-                            .size(54.dp)
+                            .size(60.dp)
                             .clip(CircleShape)
                             .background(colorVal.copy(alpha = 0.2f))
                             .border(2.dp, colorVal, CircleShape),
@@ -623,7 +625,7 @@ fun CreateEntityDialog(
     val showColorPicker = remember { mutableStateOf(false) }
 
     val imageFile = remember(imagePath, isGlobal) { viewModel.resolveEntityImageFile(imagePath, isGlobal) }
-    val imageBitmap = rememberEntityImage(imageFile)
+    val imageBitmap = rememberEntityImage(imageFile, maxDimension = 256)
 
     val types = listOf("NPC", "PC", "Place", "Item", "Monster")
 
@@ -704,6 +706,7 @@ fun CreateEntityDialog(
                                 bitmap = imageBitmap,
                                 contentDescription = "Entity Image Preview",
                                 contentScale = ContentScale.Crop,
+                                alignment = Alignment.TopCenter,
                                 modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(6.dp))
                             )
                         } else {

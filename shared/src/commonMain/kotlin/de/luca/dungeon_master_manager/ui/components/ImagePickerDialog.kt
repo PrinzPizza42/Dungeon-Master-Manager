@@ -245,7 +245,7 @@ fun ImagePickerDialog(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     // Thumbnail preview
-                                    val bitmap = rememberEntityImage(img)
+                                    val bitmap = rememberEntityImage(img, maxDimension = 128)
                                     Box(
                                         modifier = Modifier
                                             .size(54.dp)

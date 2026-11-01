@@ -1169,7 +1169,7 @@ private fun MarkdownEdit(
                         val imageFile = remember(ent.imageFilePath, projectPath) {
                             EntityImageLoader.resolveEntityImageFile(ent, projectPath)
                         }
-                        val imageBitmap = rememberEntityImage(imageFile)
+                        val imageBitmap = rememberEntityImage(imageFile, maxDimension = 128)
 
                         Row(
                             modifier = Modifier
