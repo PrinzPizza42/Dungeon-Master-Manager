@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.sp
 import org.jetbrains.compose.resources.DrawableResource
 import dungeon_master_manager.shared.generated.resources.Res
 import dungeon_master_manager.shared.generated.resources.grimoire_vellum
+import de.luca.dungeon_master_manager.data.AppSettingsRepository
 
 /**
  * An ornate divider featuring a hairline bronze rule and an optional centered gold diamond glyph (◆).
@@ -74,6 +75,9 @@ fun GrimoireCard(
     onClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit
 ) {
+    val appSettings by AppSettingsRepository.settings.collectAsState()
+    val isBatterySaver = appSettings.isBatterySaverMode
+
     val interactionSource = remember { MutableInteractionSource() }
     val isHovered by interactionSource.collectIsHoveredAsState()
 
@@ -96,7 +100,7 @@ fun GrimoireCard(
             .clip(shape)
             .background(containerColor, shape)
             .then(
-                if (texture != null) {
+                if (texture != null && !isBatterySaver) {
                     Modifier.tiledTexture(texture, alpha = textureAlpha)
                 } else Modifier
             )
@@ -119,13 +123,14 @@ fun GrimoireFolioCard(
     onClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit
 ) {
+    val appSettings by AppSettingsRepository.settings.collectAsState()
     GrimoireCard(
         modifier = modifier,
         shape = shape,
         borderColor = borderColor,
         borderHoverColor = borderHoverColor,
         containerColor = containerColor,
-        texture = Res.drawable.grimoire_vellum,
+        texture = if (!appSettings.isBatterySaverMode) Res.drawable.grimoire_vellum else null,
         textureAlpha = 0.35f,
         onClick = onClick,
         content = content

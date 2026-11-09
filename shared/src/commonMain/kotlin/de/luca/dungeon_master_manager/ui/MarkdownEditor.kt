@@ -645,6 +645,7 @@ private fun MarkdownEdit(
     focusRequester: FocusRequester,
     onTextLayoutResult: ((TextLayoutResult, OffsetMapping) -> Unit)? = null
 ) {
+    val appSettings by AppSettingsRepository.settings.collectAsState()
     val primaryColor = GrimoireColors.GoldPrimary
     val fantasyFamily = LocalFantasyFontFamily.current
 
@@ -853,7 +854,11 @@ private fun MarkdownEdit(
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .tiledTexture(Res.drawable.grimoire_vellum, alpha = 0.08f)
+            .then(
+                if (!appSettings.isBatterySaverMode) {
+                    Modifier.tiledTexture(Res.drawable.grimoire_vellum, alpha = 0.08f)
+                } else Modifier
+            )
             .pointerHoverIcon(
                 icon = if (shouldShowHandCursor) PointerIcon.Hand else PointerIcon.Default,
                 overrideDescendants = shouldShowHandCursor

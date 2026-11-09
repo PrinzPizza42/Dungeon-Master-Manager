@@ -44,6 +44,8 @@ import dungeon_master_manager.shared.generated.resources.dnd_dice
 import kotlin.random.Random
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.imageResource
+import androidx.compose.runtime.collectAsState
+import de.luca.dungeon_master_manager.data.AppSettingsRepository
 
 /**
  * High-performance GPU-accelerated modifier that tiles a seamless texture across any container size,
@@ -61,6 +63,10 @@ fun Modifier.tiledTexture(
     panOffsetProvider: (() -> Offset)? = null,
     zoomScaleProvider: (() -> Float)? = null
 ): Modifier {
+    val appSettings by AppSettingsRepository.settings.collectAsState()
+    if (appSettings.isBatterySaverMode) {
+        return this
+    }
     val imageBitmap = imageResource(resource)
     val brush = remember(imageBitmap) {
         val shader = ImageShader(imageBitmap, TileMode.Repeated, TileMode.Repeated)
@@ -108,6 +114,17 @@ fun GrimoireDeskSurface(
     zoomScaleProvider: (() -> Float)? = null,
     content: @Composable BoxScope.() -> Unit = {}
 ) {
+    val appSettings by AppSettingsRepository.settings.collectAsState()
+    if (appSettings.isBatterySaverMode) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(GrimoireColors.Background),
+            content = content
+        )
+        return
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -155,6 +172,17 @@ fun GrimoireAmbientChamber(
     enableCandleFlicker: Boolean = true,
     content: @Composable BoxScope.() -> Unit = {}
 ) {
+    val appSettings by AppSettingsRepository.settings.collectAsState()
+    if (appSettings.isBatterySaverMode) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(GrimoireColors.Background),
+            content = content
+        )
+        return
+    }
+
     val candleAlpha by if (enableCandleFlicker) {
         val infiniteTransition = rememberInfiniteTransition(label = "WarTableCandleFlicker")
         infiniteTransition.animateFloat(
@@ -230,6 +258,9 @@ fun BoxScope.RealisticTableDropShadow(
     modifier: Modifier = Modifier,
     shape: Shape = RoundedCornerShape(12.dp)
 ) {
+    val appSettings by AppSettingsRepository.settings.collectAsState()
+    if (appSettings.isBatterySaverMode) return
+
     Box(
         modifier = modifier
             .matchParentSize()
@@ -289,6 +320,9 @@ fun TabletopFurPelt(
     peekY: Dp = 150.dp,
     rotation: Float = -14f
 ) {
+    val appSettings by AppSettingsRepository.settings.collectAsState()
+    if (appSettings.isBatterySaverMode) return
+
     val peltBitmap = imageResource(Res.drawable.prop_fur_pelt)
     Image(
         bitmap = peltBitmap,
@@ -311,11 +345,16 @@ fun TabletopFurPelt(
 fun FogOfWarSurface(
     modifier: Modifier = Modifier
 ) {
+    val appSettings by AppSettingsRepository.settings.collectAsState()
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(Color(0xFF324050))
-            .tiledTexture(Res.drawable.fog_of_war, alpha = 0.95f)
+            .then(
+                if (!appSettings.isBatterySaverMode) {
+                    Modifier.tiledTexture(Res.drawable.fog_of_war, alpha = 0.95f)
+                } else Modifier
+            )
     )
 }
 
@@ -352,12 +391,17 @@ fun GrimoireVellumTomePage(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val appSettings by AppSettingsRepository.settings.collectAsState()
     Box(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(GrimoireColors.SurfaceLow, RoundedCornerShape(8.dp))
-            .tiledTexture(Res.drawable.grimoire_vellum, alpha = 0.28f)
+            .then(
+                if (!appSettings.isBatterySaverMode) {
+                    Modifier.tiledTexture(Res.drawable.grimoire_vellum, alpha = 0.28f)
+                } else Modifier
+            )
             .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(8.dp))
             .padding(24.dp)
     ) {
@@ -378,6 +422,9 @@ fun OrganicMapFogWreath(
     mapSeed: Int = 42,
     encroachRatio: Float = 0.07f
 ) {
+    val appSettings by AppSettingsRepository.settings.collectAsState()
+    if (appSettings.isBatterySaverMode) return
+
     val puff1 = imageResource(Res.drawable.fog_puff_1)
     val puff2 = imageResource(Res.drawable.fog_puff_2)
     val puff3 = imageResource(Res.drawable.fog_puff_3)
@@ -579,6 +626,9 @@ fun TabletopPropsDeskLayer(
     mapWidth: Dp,
     mapHeight: Dp
 ) {
+    val appSettings by AppSettingsRepository.settings.collectAsState()
+    if (appSettings.isBatterySaverMode) return
+
     val diceBitmap = imageResource(Res.drawable.dnd_dice)
     val coinsBitmap = imageResource(Res.drawable.prop_coins)
     val quillBitmap = imageResource(Res.drawable.prop_quill)
@@ -638,6 +688,9 @@ fun TabletopPropsMapAccentsLayer(
     mapWidth: Dp,
     mapHeight: Dp
 ) {
+    val appSettings by AppSettingsRepository.settings.collectAsState()
+    if (appSettings.isBatterySaverMode) return
+
     val compassBitmap = imageResource(Res.drawable.prop_compass)
     val sealBitmap = imageResource(Res.drawable.prop_seal)
 
@@ -679,6 +732,9 @@ fun TabletopPropsOverlay(
     mapWidth: Dp,
     mapHeight: Dp
 ) {
+    val appSettings by AppSettingsRepository.settings.collectAsState()
+    if (appSettings.isBatterySaverMode) return
+
     TabletopPropsDeskLayer(modifier = modifier, mapWidth = mapWidth, mapHeight = mapHeight)
     TabletopPropsMapAccentsLayer(modifier = modifier, mapWidth = mapWidth, mapHeight = mapHeight)
 }
