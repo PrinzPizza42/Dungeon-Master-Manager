@@ -311,7 +311,7 @@ fun colorElement(
                                         showPopup.value = false
                                         onClick(color.value)
                                     },
-                                    content = { Text("Safe") },
+                                    content = { Text("Save") },
                                     modifier = Modifier.padding(5.dp)
                                 )
                             }

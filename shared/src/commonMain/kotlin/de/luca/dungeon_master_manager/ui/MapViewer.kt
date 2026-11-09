@@ -252,7 +252,7 @@ fun MapViewer(
                         while (true) {
                             val event = awaitPointerEvent()
                             if (event.type == androidx.compose.ui.input.pointer.PointerEventType.Scroll) {
-                                if (!addPinMode && viewportSize.width > 0) {
+                                if (viewportSize.width > 0) {
                                     val cursorPosition = event.changes.first().position
                                     val rawDelta = event.changes.first().scrollDelta.y
 
@@ -415,8 +415,17 @@ fun MapViewer(
                     }
 
                     // 3. Batched Markers Overlay Canvas
+                    val renderedMarkers = remember(visibleMarkers, showMarkerDialog) {
+                        val dialogMarker = showMarkerDialog
+                        if (dialogMarker != null && visibleMarkers.none { it.id == dialogMarker.id }) {
+                            visibleMarkers + dialogMarker
+                        } else {
+                            visibleMarkers
+                        }
+                    }
+
                     MapMarkersCanvas(
-                        markers = visibleMarkers,
+                        markers = renderedMarkers,
                         projectEntities = projectEnts,
                         globalEntities = globalEnts,
                         projectPath = projectPath,

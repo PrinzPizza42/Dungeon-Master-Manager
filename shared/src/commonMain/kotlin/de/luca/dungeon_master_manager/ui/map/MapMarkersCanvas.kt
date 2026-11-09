@@ -1,5 +1,7 @@
 package de.luca.dungeon_master_manager.ui.map
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -62,6 +64,11 @@ data class MarkerRenderData(
     val labelText: String?,
     val entityName: String?,
     val linkedEntity: Entity?
+)
+
+private data class DropAnimState(
+    val pos: Offset,
+    val anim: Animatable<Float, AnimationVector1D>
 )
 
 @Composable
@@ -193,9 +200,19 @@ fun MapMarkersCanvas(
         }
     }
 
+    val coroutineScope = rememberCoroutineScope()
     var hoveredMarker by remember { mutableStateOf<MarkerRenderData?>(null) }
     var contextMenuMarker by remember { mutableStateOf<MarkerRenderData?>(null) }
     var emptySpaceContextMenuPos by remember { mutableStateOf<Offset?>(null) }
+
+    var ghostCursorPos by remember { mutableStateOf<Offset?>(null) }
+    var dropAnimation by remember { mutableStateOf<DropAnimState?>(null) }
+
+    LaunchedEffect(addPinMode) {
+        if (!addPinMode) {
+            ghostCursorPos = null
+        }
+    }
 
     val cursorModifier = if (addPinMode) {
         Modifier.pointerHoverIcon(PointerIcon(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR)))
@@ -205,7 +222,7 @@ fun MapMarkersCanvas(
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(renderDataList, mapWidthPx, mapHeightPx, addPinMode) {
+                .pointerInput(renderDataList, mapWidthPx, mapHeightPx, addPinMode, dropAnimation != null) {
                     awaitPointerEventScope {
                         while (true) {
                             val event = awaitPointerEvent()
@@ -234,7 +251,7 @@ fun MapMarkersCanvas(
                             }
 
                             when (event.type) {
-                                PointerEventType.Move -> {
+                                PointerEventType.Move, PointerEventType.Scroll -> {
                                     if (!addPinMode && contextMenuMarker == null) {
                                         val found = findMarkerAt(pos)
                                         if (hoveredMarker?.marker?.id != found?.marker?.id) {
@@ -245,20 +262,39 @@ fun MapMarkersCanvas(
                                         hoveredMarker = null
                                         onHoverMarker?.invoke(null)
                                     }
+
+                                    if (addPinMode && dropAnimation == null) {
+                                        ghostCursorPos = pos
+                                    } else {
+                                        ghostCursorPos = null
+                                    }
                                 }
 
                                 PointerEventType.Exit -> {
                                     hoveredMarker = null
                                     onHoverMarker?.invoke(null)
+                                    ghostCursorPos = null
                                 }
 
                                 PointerEventType.Press -> {
-                                    if (addPinMode && onAddPin != null) {
-                                        if (mapWidthPx > 0f && mapHeightPx > 0f) {
-                                            val x = (pos.x / mapWidthPx).coerceIn(0f, 1f)
-                                            val y = (pos.y / mapHeightPx).coerceIn(0f, 1f)
-                                            onAddPin(x, y)
+                                    if (addPinMode && onAddPin != null && dropAnimation == null) {
+                                        if (mapWidthPx > 0f && mapHeightPx > 0f && event.buttons.isPrimaryPressed) {
+                                            val clickPos = pos
+                                            val x = (clickPos.x / mapWidthPx).coerceIn(0f, 1f)
+                                            val y = (clickPos.y / mapHeightPx).coerceIn(0f, 1f)
+                                            ghostCursorPos = null
                                             event.changes.forEach { it.consume() }
+
+                                            coroutineScope.launch {
+                                                val anim = Animatable(0f)
+                                                dropAnimation = DropAnimState(clickPos, anim)
+                                                anim.animateTo(
+                                                    targetValue = 1f,
+                                                    animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing)
+                                                )
+                                                onAddPin(x, y)
+                                                dropAnimation = null
+                                            }
                                         }
                                     } else {
                                         val found = findMarkerAt(pos)
@@ -402,6 +438,106 @@ fun MapMarkersCanvas(
                         )
                     }
                 }
+            }
+
+            // Ghost Pin Preview under Cursor (Add Pin Mode)
+            if (addPinMode && ghostCursorPos != null && dropAnimation == null) {
+                val gPos = ghostCursorPos!!
+                val ghostRadius = currentRadius * 1.25f
+
+                // Pulsing ambient gold glow around ghost pin
+                val ghostHaloRadius = ghostRadius + (baseHaloOffsetMinPx + baseHaloOffsetRangePx * pulseFraction) * markerAdaptiveScale
+                val ghostHaloAlpha = (0.35f + 0.35f * (1f - pulseFraction)).coerceIn(0.15f, 0.75f)
+
+                drawCircle(
+                    color = GrimoireColors.GoldContainer.copy(alpha = ghostHaloAlpha * 0.35f),
+                    radius = ghostHaloRadius,
+                    center = gPos
+                )
+                drawCircle(
+                    color = GrimoireColors.GoldPrimary.copy(alpha = ghostHaloAlpha * 0.75f),
+                    radius = ghostHaloRadius,
+                    center = gPos,
+                    style = Stroke(width = haloBorderWidth * 1.15f)
+                )
+
+                // Ghost Pin Body (Red with 65% alpha)
+                drawCircle(
+                    color = Color.Red.copy(alpha = 0.65f),
+                    radius = ghostRadius,
+                    center = gPos
+                )
+                drawCircle(
+                    color = Color.Black.copy(alpha = 0.5f),
+                    radius = ghostRadius,
+                    center = gPos,
+                    style = Stroke(width = dotRimWidth * 1.25f)
+                )
+                // Center precision dot
+                drawCircle(
+                    color = Color.White.copy(alpha = 0.85f),
+                    radius = ghostRadius * 0.22f,
+                    center = gPos
+                )
+            }
+
+            // Drop Animation Transition (Ghost Fades Out & Shrinks -> Real Marker Fades In & Pops + Golden Ripple)
+            if (dropAnimation != null) {
+                val drop = dropAnimation!!
+                val t = drop.anim.value
+                val dPos = drop.pos
+
+                // 1. Ghost Pin Fade-out & Shrink (1.25x -> 1.0x, 0.65f -> 0f)
+                val ghostScale = 1.25f - 0.25f * t
+                val ghostAlpha = (0.65f * (1f - t)).coerceIn(0f, 1f)
+                val ghostR = currentRadius * ghostScale
+                if (ghostAlpha > 0.01f) {
+                    drawCircle(
+                        color = Color.Red.copy(alpha = ghostAlpha),
+                        radius = ghostR,
+                        center = dPos
+                    )
+                    drawCircle(
+                        color = Color.Black.copy(alpha = 0.5f * (1f - t)),
+                        radius = ghostR,
+                        center = dPos,
+                        style = Stroke(width = dotRimWidth * ghostScale)
+                    )
+                }
+
+                // 2. Real Marker Fade-in & Pop (0.8x -> 1.0x, 0f -> 1f)
+                val markerScale = 0.8f + 0.2f * t
+                val markerAlpha = t.coerceIn(0f, 1f)
+                val markerR = currentRadius * markerScale
+                drawCircle(
+                    color = Color.Red.copy(alpha = markerAlpha),
+                    radius = markerR,
+                    center = dPos
+                )
+                drawCircle(
+                    color = Color.Black.copy(alpha = 0.45f * markerAlpha),
+                    radius = markerR,
+                    center = dPos,
+                    style = Stroke(width = dotRimWidth * markerScale)
+                )
+
+                // 3. Golden Ripple Shockwave Expanding Outward
+                val maxRippleExtra = with(density) { 18.dp.toPx() } * markerAdaptiveScale
+                val rippleRadius = currentRadius + maxRippleExtra * t
+                val rippleAlpha = (0.85f * (1f - t * t)).coerceIn(0f, 1f)
+                val rippleStrokeWidth = (with(density) { 2.dp.toPx() } * markerAdaptiveScale * (1f - 0.4f * t)).coerceAtLeast(0.5f)
+
+                drawCircle(
+                    color = GrimoireColors.GoldContainer.copy(alpha = rippleAlpha * 0.35f),
+                    radius = rippleRadius * 0.92f,
+                    center = dPos
+                )
+                drawCircle(
+                    color = GrimoireColors.GoldPrimary.copy(alpha = rippleAlpha),
+                    radius = rippleRadius,
+                    center = dPos,
+                    style = Stroke(width = rippleStrokeWidth)
+                )
             }
         }
 
