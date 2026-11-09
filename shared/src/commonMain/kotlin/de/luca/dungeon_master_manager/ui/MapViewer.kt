@@ -1,9 +1,15 @@
 package de.luca.dungeon_master_manager.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.FastOutSlowInEasing
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.pow
 import androidx.compose.foundation.Image
@@ -63,9 +69,11 @@ import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.ui.zIndex
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
@@ -220,6 +228,55 @@ fun MapViewer(
         val tableHeight = baseMapHeight + marginY * 2f
         val tableWidthDp = with(density) { tableWidth.toDp() }
         val tableHeightDp = with(density) { tableHeight.toDp() }
+
+        var isSidebarOpen by remember { mutableStateOf(false) }
+        var highlightedMarkerId by remember { mutableStateOf<String?>(null) }
+        var highlightClearJob by remember { mutableStateOf<Job?>(null) }
+
+        fun focusOnMarker(marker: MapMarker) {
+            if (viewportSize.width <= 0 || viewportSize.height <= 0) return
+            highlightedMarkerId = marker.id
+            highlightClearJob?.cancel()
+            highlightClearJob = coroutineScope.launch {
+                delay(3000)
+                if (highlightedMarkerId == marker.id) {
+                    highlightedMarkerId = null
+                }
+            }
+
+            val targetZoom = maxOf(scale, 1.8f).coerceIn(MIN_MAP_ZOOM, MAX_MAP_ZOOM)
+            val effectiveW = if (!isEcoMode) tableWidth else baseMapWidth
+            val effectiveH = if (!isEcoMode) tableHeight else baseMapHeight
+            val maxPanX = (viewportSize.width / 2f) + (effectiveW * targetZoom / 2f) - 100f
+            val maxPanY = (viewportSize.height / 2f) + (effectiveH * targetZoom / 2f) - 100f
+
+            val sidebarWidthPx = if (isSidebarOpen) with(density) { MAP_MARKER_SIDEBAR_WIDTH.toPx() } else 0f
+            var newTargetX = (sidebarWidthPx / 2f) - (marker.x - 0.5f) * baseMapWidth * targetZoom
+            var newTargetY = -(marker.y - 0.5f) * baseMapHeight * targetZoom
+
+            if (maxPanX > 0) newTargetX = newTargetX.coerceIn(-maxPanX, maxPanX)
+            if (maxPanY > 0) newTargetY = newTargetY.coerceIn(-maxPanY, maxPanY)
+
+            targetScale = targetZoom
+            targetOffsetX = newTargetX
+            targetOffsetY = newTargetY
+
+            zoomJob?.cancel()
+            zoomJob = coroutineScope.launch {
+                val startScale = scale
+                val startX = offsetX
+                val startY = offsetY
+                val anim = Animatable(0f)
+                anim.animateTo(
+                    targetValue = 1f,
+                    animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing)
+                ) {
+                    scale = startScale + (targetScale - startScale) * value
+                    offsetX = startX + (targetOffsetX - startX) * value
+                    offsetY = startY + (targetOffsetY - startY) * value
+                }
+            }
+        }
 
         Box(
             modifier = Modifier
@@ -450,6 +507,7 @@ fun MapViewer(
                             addPinMode = false
                         },
                         onHoverMarker = { hoveredMarkerData = it },
+                        highlightedMarkerId = highlightedMarkerId,
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -510,6 +568,69 @@ fun MapViewer(
                     )
                 }
             }
+        }
+
+        // Marker Sidebar Toggle Button (Top Left)
+        AnimatedVisibility(
+            visible = !isSidebarOpen,
+            enter = fadeIn(tween(150)),
+            exit = fadeOut(tween(150)),
+            modifier = Modifier.align(Alignment.TopStart).padding(16.dp).zIndex(5f)
+        ) {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f),
+                shape = MaterialTheme.shapes.medium,
+                border = BorderStroke(1.dp, GrimoireColors.BorderBronze)
+            ) {
+                Row(modifier = Modifier.padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { isSidebarOpen = true },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondary,
+                            contentColor = MaterialTheme.colorScheme.onSecondary
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.List,
+                            contentDescription = "Open Marker List",
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text("Markers (${visibleMarkers.size})")
+                    }
+                }
+            }
+        }
+
+        // Marker Sidebar Drawer (Left Overlay)
+        AnimatedVisibility(
+            visible = isSidebarOpen,
+            enter = slideInHorizontally(initialOffsetX = { -it }) + fadeIn(),
+            exit = slideOutHorizontally(targetOffsetX = { -it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.TopStart).fillMaxHeight().zIndex(15f)
+        ) {
+            MapMarkerSidebar(
+                markers = visibleMarkers,
+                projectEntities = projectEnts,
+                globalEntities = globalEnts,
+                projectPath = projectPath,
+                highlightedMarkerId = highlightedMarkerId,
+                onSelectMarker = { marker -> focusOnMarker(marker) },
+                onEditMarker = { marker -> showMarkerDialog = marker },
+                onOpenEntityPopout = onOpenEntityPopout,
+                onUpdateMarker = { updatedMarker ->
+                    val newMarkers = mapData.markers.map { if (it.id == updatedMarker.id) updatedMarker else it }
+                    mapData = mapData.copy(markers = newMarkers)
+                    saveMap()
+                },
+                onUpdateMarkers = { updatedList ->
+                    val updatedMap = updatedList.associateBy { it.id }
+                    val newMarkers = mapData.markers.map { updatedMap[it.id] ?: it }
+                    mapData = mapData.copy(markers = newMarkers)
+                    saveMap()
+                },
+                onClose = { isSidebarOpen = false }
+            )
         }
 
         // Toolbar
@@ -754,6 +875,17 @@ fun MapViewer(
                                     modifier = Modifier.weight(1f, fill = false)
                                 )
                                 Spacer(Modifier.width(6.dp))
+                                if (activeHoverMarker.marker.isHidden) {
+                                    Box(
+                                        modifier = Modifier
+                                            .background(GrimoireColors.SurfaceLow, RoundedCornerShape(4.dp))
+                                            .border(1.dp, GrimoireColors.BorderBronzeSubtle, RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                                    ) {
+                                        Text("HIDDEN", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = GrimoireColors.ParchmentDim)
+                                    }
+                                    Spacer(Modifier.width(4.dp))
+                                }
                                 Box(
                                     modifier = Modifier
                                         .background(entColor.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
@@ -813,8 +945,20 @@ fun MapViewer(
                                     fontWeight = FontWeight.Bold,
                                     color = GrimoireColors.ParchmentLight,
                                     maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
                                 )
+                                if (activeHoverMarker.marker.isHidden) {
+                                    Spacer(Modifier.width(6.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .background(GrimoireColors.SurfaceLow, RoundedCornerShape(4.dp))
+                                            .border(1.dp, GrimoireColors.BorderBronzeSubtle, RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                                    ) {
+                                        Text("HIDDEN", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = GrimoireColors.ParchmentDim)
+                                    }
+                                }
                             }
 
                             if (!activeHoverMarker.marker.notes.isNullOrBlank()) {
@@ -982,6 +1126,7 @@ fun MapMarkerDialog(
     onDelete: (MapMarker) -> Unit
 ) {
     var isEntityLinked by remember { mutableStateOf(initialMarker.isEntityLinked) }
+    var isHidden by remember { mutableStateOf(initialMarker.isHidden) }
 
     // Find initial entity to display its name
     val initEnt = if (initialMarker.entityId != null) {
@@ -1006,6 +1151,9 @@ fun MapMarkerDialog(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = isEntityLinked, onCheckedChange = { isEntityLinked = it })
                     Text("Link to Entity")
+                    Spacer(Modifier.width(16.dp))
+                    Checkbox(checked = isHidden, onCheckedChange = { isHidden = it })
+                    Text("Hidden")
                 }
 
                 if (isEntityLinked) {
@@ -1232,7 +1380,8 @@ fun MapMarkerDialog(
                         title = if (!isEntityLinked) title else null,
                         notes = if (!isEntityLinked) notes else null,
                         iconFileName = iconFileName,
-                        colorULong = color
+                        colorULong = color,
+                        isHidden = isHidden
                     ))
                 },
                 enabled = if (isEntityLinked) selectedEntityId != null else true

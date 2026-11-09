@@ -18,7 +18,8 @@ data class MapMarker(
     val colorULong: String? = null, // e.g. "4294901760" for Color.value
     
     // Shared
-    val iconFileName: String? = null // e.g. "skull.png". If null, render as dot.
+    val iconFileName: String? = null, // e.g. "skull.png". If null, render as dot.
+    val isHidden: Boolean = false
 )
 
 @Serializable

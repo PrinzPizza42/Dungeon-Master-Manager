@@ -26,6 +26,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -86,6 +87,7 @@ fun MapMarkersCanvas(
     onAddPin: ((x: Float, y: Float) -> Unit)? = null,
     projectPath: String = "",
     onHoverMarker: ((MarkerRenderData?) -> Unit)? = null,
+    highlightedMarkerId: String? = null,
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
@@ -350,7 +352,9 @@ fun MapMarkersCanvas(
                 val cx = r.marker.x * mapWidthPx
                 val cy = r.marker.y * mapHeightPx
 
-                val isFocused = hoveredMarker?.marker?.id == r.marker.id || contextMenuMarker?.marker?.id == r.marker.id
+                val isFocused = hoveredMarker?.marker?.id == r.marker.id ||
+                    contextMenuMarker?.marker?.id == r.marker.id ||
+                    highlightedMarkerId == r.marker.id
                 if (isFocused) {
                     val baseTargetRadius = if (r.tokenBitmap != null) {
                         (baseTokenSizePx * markerAdaptiveScale) / 2f
@@ -373,7 +377,23 @@ fun MapMarkersCanvas(
                         center = Offset(cx, cy),
                         style = Stroke(width = haloBorderWidth)
                     )
+
+                    // Extra beacon pulse for sidebar-selected marker
+                    if (highlightedMarkerId == r.marker.id) {
+                        val beaconRadius = baseTargetRadius + (baseHaloOffsetMinPx + baseHaloOffsetRangePx * 2.2f * pulseFraction) * markerAdaptiveScale
+                        val beaconAlpha = (0.75f * (1f - pulseFraction)).coerceIn(0.1f, 0.85f)
+                        drawCircle(
+                            color = GrimoireColors.GoldBright.copy(alpha = beaconAlpha),
+                            radius = beaconRadius,
+                            center = Offset(cx, cy),
+                            style = Stroke(width = haloBorderWidth * 1.5f)
+                        )
+                    }
                 }
+
+                val isHidden = r.marker.isHidden
+                val markerAlpha = if (isHidden) 0.35f else 1.0f
+                val dashEffect = if (isHidden) PathEffect.dashPathEffect(floatArrayOf(4f * markerAdaptiveScale, 3f * markerAdaptiveScale)) else null
 
                 if (r.tokenBitmap != null) {
                     val tokenSize = baseTokenSizePx * markerAdaptiveScale
@@ -381,12 +401,12 @@ fun MapMarkersCanvas(
 
                     // Subtle background fill for transparent token images:
                     drawCircle(
-                        color = GrimoireColors.SurfaceLow,
+                        color = GrimoireColors.SurfaceLow.copy(alpha = 0.5f * markerAlpha),
                         radius = tokenRadius,
                         center = Offset(cx, cy)
                     )
                     drawCircle(
-                        color = r.color.copy(alpha = 0.2f),
+                        color = r.color.copy(alpha = 0.2f * markerAlpha),
                         radius = tokenRadius,
                         center = Offset(cx, cy)
                     )
@@ -398,19 +418,20 @@ fun MapMarkersCanvas(
                         drawImage(
                             image = r.tokenBitmap,
                             dstOffset = IntOffset((cx - tokenRadius).roundToInt(), (cy - tokenRadius).roundToInt()),
-                            dstSize = IntSize(tokenSize.roundToInt().coerceAtLeast(1), tokenSize.roundToInt().coerceAtLeast(1))
+                            dstSize = IntSize(tokenSize.roundToInt().coerceAtLeast(1), tokenSize.roundToInt().coerceAtLeast(1)),
+                            alpha = markerAlpha
                         )
                     }
                     // Border ring in entity color:
                     drawCircle(
-                        color = r.color,
+                        color = r.color.copy(alpha = markerAlpha),
                         radius = tokenRadius,
                         center = Offset(cx, cy),
-                        style = Stroke(width = tokenBorderWidth)
+                        style = Stroke(width = tokenBorderWidth, pathEffect = dashEffect)
                     )
                     // Outer dark rim for contrast:
                     drawCircle(
-                        color = Color.Black.copy(alpha = 0.45f),
+                        color = Color.Black.copy(alpha = 0.45f * markerAlpha),
                         radius = tokenRadius + tokenRimOffset,
                         center = Offset(cx, cy),
                         style = Stroke(width = tokenRimWidth)
@@ -422,19 +443,26 @@ fun MapMarkersCanvas(
                         drawImage(
                             image = icon,
                             dstOffset = IntOffset((cx - half).toInt(), (cy - half).toInt()),
-                            dstSize = IntSize(currentSize.toInt().coerceAtLeast(1), currentSize.toInt().coerceAtLeast(1))
+                            dstSize = IntSize(currentSize.toInt().coerceAtLeast(1), currentSize.toInt().coerceAtLeast(1)),
+                            alpha = markerAlpha
+                        )
+                        drawCircle(
+                            color = Color.Black.copy(alpha = 0.45f * markerAlpha),
+                            radius = currentRadius + tokenRimOffset,
+                            center = Offset(cx, cy),
+                            style = Stroke(width = tokenRimWidth, pathEffect = dashEffect)
                         )
                     } else {
                         drawCircle(
-                            color = r.color,
+                            color = r.color.copy(alpha = markerAlpha),
                             radius = currentRadius,
                             center = Offset(cx, cy)
                         )
                         drawCircle(
-                            color = Color.Black.copy(alpha = 0.45f),
+                            color = Color.Black.copy(alpha = 0.45f * markerAlpha),
                             radius = currentRadius,
                             center = Offset(cx, cy),
-                            style = Stroke(width = dotRimWidth)
+                            style = Stroke(width = dotRimWidth, pathEffect = dashEffect)
                         )
                     }
                 }
