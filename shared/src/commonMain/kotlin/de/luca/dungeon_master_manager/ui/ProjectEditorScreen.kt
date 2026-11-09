@@ -94,6 +94,25 @@ fun ProjectEditorScreen(
         onTitleChange(currentTitle)
     }
 
+    LaunchedEffect(viewModel, window, windowState) {
+        de.luca.dungeon_master_manager.data.GlobalFileOpener.openFileRequests.collect { file ->
+            if (file.exists() && file.isFile) {
+                viewModel.openFile(
+                    de.luca.dungeon_master_manager.data.FileNode(
+                        name = file.name,
+                        path = file.absolutePath,
+                        isDirectory = false
+                    )
+                )
+                if (windowState != null && windowState.isMinimized) {
+                    windowState.isMinimized = false
+                }
+                window?.toFront()
+                window?.requestFocus()
+            }
+        }
+    }
+
     if (window != null) {
         DisposableEffect(window) {
             val focusListener = object : java.awt.event.WindowFocusListener {

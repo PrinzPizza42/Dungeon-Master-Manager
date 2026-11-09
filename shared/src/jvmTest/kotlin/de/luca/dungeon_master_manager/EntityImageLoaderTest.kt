@@ -159,4 +159,37 @@ class EntityImageLoaderTest {
         EntityImageLoader.clear()
         assertNull(EntityImageLoader.getImageSync(file, maxDimension = 128))
     }
+
+    @Test
+    fun testMultiResolutionCaching() = runBlocking {
+        if (!isComposeBitmapAvailable()) {
+            println("Skipping Compose ImageBitmap test in headless environment without libGL")
+            return@runBlocking
+        }
+
+        val file = File(tempDir, "high_res_portrait.png")
+        val bi = BufferedImage(1000, 1500, BufferedImage.TYPE_INT_ARGB)
+        ImageIO.write(bi, "png", file)
+
+        // 1. Load small avatar resolution (128)
+        val thumb128 = EntityImageLoader.loadImage(file, maxDimension = 128)
+        assertNotNull(thumb128)
+        assertEquals(128, thumb128.height)
+
+        // Exact 128 is present
+        assertNotNull(EntityImageLoader.getExactImageSync(file, maxDimension = 128))
+        // Exact 1600 is NOT present yet
+        assertNull(EntityImageLoader.getExactImageSync(file, maxDimension = 1600))
+
+        // 2. Load high-res preview resolution (1600)
+        val thumb1600 = EntityImageLoader.loadImage(file, maxDimension = 1600)
+        assertNotNull(thumb1600)
+        assertEquals(1500, thumb1600.height)
+
+        // Now exact 1600 is present
+        val exact1600 = EntityImageLoader.getExactImageSync(file, maxDimension = 1600)
+        assertNotNull(exact1600)
+        assertEquals(1500, exact1600.height)
+        assertTrue(exact1600.height > thumb128.height)
+    }
 }

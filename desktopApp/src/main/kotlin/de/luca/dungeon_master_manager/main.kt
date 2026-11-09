@@ -98,7 +98,11 @@ fun main() {
                             windowState = entityState,
                             title = entityTitle,
                             onClose = { openEntityWindows.removeAll { it.request == entry.request } },
-                            onOpenEntityPopout = handleOpenEntityPopout
+                            onOpenEntityPopout = handleOpenEntityPopout,
+                            onOpenFileInMain = { file ->
+                                de.luca.dungeon_master_manager.data.GlobalFileOpener.openFile(file)
+                                mainWindowState.isMinimized = false
+                            }
                         )
                     }
                 }

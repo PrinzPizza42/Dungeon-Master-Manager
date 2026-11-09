@@ -21,7 +21,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import de.luca.dungeon_master_manager.data.EntityPopoutRequest
+import de.luca.dungeon_master_manager.data.GlobalFileOpener
 import de.luca.dungeon_master_manager.data.ProjectRepository
 import de.luca.dungeon_master_manager.ui.components.GrimoireTitleBar
 import de.luca.dungeon_master_manager.ui.components.rememberEntityImage
@@ -40,6 +43,7 @@ fun EntityPopoutScreen(
     request: EntityPopoutRequest,
     onClose: () -> Unit,
     onOpenEntityPopout: (EntityPopoutRequest) -> Unit,
+    onOpenFileInMain: ((File) -> Unit)? = null,
     window: Window? = null,
     windowState: androidx.compose.ui.window.WindowState? = null,
     title: String = request.entityName
@@ -403,7 +407,13 @@ fun EntityPopoutScreen(
                                             .fillMaxWidth(0.9f)
                                             .clip(RoundedCornerShape(8.dp))
                                             .border(2.dp, entityColor, RoundedCornerShape(8.dp))
-                                            .background(GrimoireColors.SurfaceCard),
+                                            .background(GrimoireColors.SurfaceCard)
+                                            .pointerHoverIcon(if (imageFile != null && imageFile.exists()) PointerIcon.Hand else PointerIcon.Default)
+                                            .clickable(enabled = imageFile != null && imageFile.exists()) {
+                                                imageFile?.let { file ->
+                                                    onOpenFileInMain?.invoke(file) ?: GlobalFileOpener.openFile(file)
+                                                }
+                                            },
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Image(

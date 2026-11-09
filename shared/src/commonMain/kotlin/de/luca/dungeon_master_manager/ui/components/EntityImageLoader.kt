@@ -53,6 +53,14 @@ object EntityImageLoader {
         return "${file.absolutePath}:${file.lastModified()}:$maxDimension"
     }
 
+    fun getExactImageSync(file: File?, maxDimension: Int = 512): ImageBitmap? {
+        if (file == null || !file.exists() || !file.isFile) return null
+        val exactKey = cacheKey(file, maxDimension)
+        synchronized(cacheLock) {
+            return cache[exactKey]
+        }
+    }
+
     fun getImageSync(file: File?, maxDimension: Int = 512): ImageBitmap? {
         if (file == null || !file.exists() || !file.isFile) return null
         val exactKey = cacheKey(file, maxDimension)
@@ -199,12 +207,18 @@ object EntityImageLoader {
 @Composable
 fun rememberEntityImage(file: File?, maxDimension: Int = 512): ImageBitmap? {
     var bitmap by remember(file?.absolutePath, file?.lastModified(), maxDimension) {
-        mutableStateOf(EntityImageLoader.getImageSync(file, maxDimension))
+        mutableStateOf(EntityImageLoader.getExactImageSync(file, maxDimension) ?: EntityImageLoader.getImageSync(file, maxDimension))
     }
 
     LaunchedEffect(file?.absolutePath, file?.lastModified(), maxDimension) {
-        if (bitmap == null) {
-            bitmap = EntityImageLoader.loadImage(file, maxDimension)
+        val exact = EntityImageLoader.getExactImageSync(file, maxDimension)
+        if (exact != null) {
+            bitmap = exact
+        } else {
+            val loaded = EntityImageLoader.loadImage(file, maxDimension)
+            if (loaded != null) {
+                bitmap = loaded
+            }
         }
     }
 

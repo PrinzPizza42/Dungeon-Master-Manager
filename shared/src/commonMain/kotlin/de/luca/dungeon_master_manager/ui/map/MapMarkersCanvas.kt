@@ -86,6 +86,14 @@ fun MapMarkersCanvas(
     val baseRadiusPx = baseMarkerSizePx / 2f
     val baseTokenSizePx = with(density) { 29.dp.toPx() }
     val baseTokenRadiusPx = baseTokenSizePx / 2f
+    val baseHitExtraPx = with(density) { 6.dp.toPx() }
+    val baseTokenBorderWidthPx = with(density) { 2.5.dp.toPx() }
+    val baseTokenRimWidthPx = with(density) { 1.dp.toPx() }
+    val baseTokenRimOffsetPx = with(density) { 0.8.dp.toPx() }
+    val baseHaloBorderWidthPx = with(density) { 2.dp.toPx() }
+    val baseHaloOffsetMinPx = with(density) { 3.5.dp.toPx() }
+    val baseHaloOffsetRangePx = with(density) { 5.dp.toPx() }
+    val baseDotRimWidthPx = with(density) { 1.dp.toPx() }
 
     val appSettings by AppSettingsRepository.settings.collectAsState()
     val isBatterySaver = appSettings.isBatterySaverMode
@@ -204,7 +212,8 @@ fun MapMarkersCanvas(
                             val pos = event.changes.firstOrNull()?.position ?: continue
                             val currentScale = scaleProvider()
                             val markerAdaptiveScale = (currentScale.pow(-0.85f)).coerceIn(0.02f, 2.0f)
-                            val hitRadius = (baseRadiusPx + with(density) { 6.dp.toPx() }) * markerAdaptiveScale
+                            val hitRadius = (baseRadiusPx + baseHitExtraPx) * markerAdaptiveScale
+                            val tokenHitRadius = (baseTokenRadiusPx + baseHitExtraPx) * markerAdaptiveScale
 
                             fun findMarkerAt(p: Offset): MarkerRenderData? {
                                 if (mapWidthPx <= 0f || mapHeightPx <= 0f) return null
@@ -214,7 +223,7 @@ fun MapMarkersCanvas(
                                     val mx = r.marker.x * mapWidthPx
                                     val my = r.marker.y * mapHeightPx
                                     val radius = if (r.tokenBitmap != null) {
-                                        (baseTokenRadiusPx + with(density) { 6.dp.toPx() }) * markerAdaptiveScale
+                                        tokenHitRadius
                                     } else {
                                         hitRadius
                                     }
@@ -295,6 +304,12 @@ fun MapMarkersCanvas(
             val currentRadius = baseRadiusPx * markerAdaptiveScale
             val currentSize = baseMarkerSizePx * markerAdaptiveScale
 
+            val tokenBorderWidth = baseTokenBorderWidthPx * markerAdaptiveScale
+            val tokenRimWidth = baseTokenRimWidthPx * markerAdaptiveScale
+            val tokenRimOffset = baseTokenRimOffsetPx * markerAdaptiveScale
+            val haloBorderWidth = baseHaloBorderWidthPx * markerAdaptiveScale
+            val dotRimWidth = baseDotRimWidthPx * markerAdaptiveScale
+
             for (r in renderDataList) {
                 val cx = r.marker.x * mapWidthPx
                 val cy = r.marker.y * mapHeightPx
@@ -306,7 +321,7 @@ fun MapMarkersCanvas(
                     } else {
                         currentRadius
                     }
-                    val haloRadius = baseTargetRadius + (3.5f + 5f * pulseFraction) * markerAdaptiveScale
+                    val haloRadius = baseTargetRadius + (baseHaloOffsetMinPx + baseHaloOffsetRangePx * pulseFraction) * markerAdaptiveScale
                     val haloAlpha = (0.25f + 0.35f * (1f - pulseFraction)).coerceIn(0.1f, 0.7f)
 
                     // Soft ambient gold fill
@@ -320,13 +335,26 @@ fun MapMarkersCanvas(
                         color = GrimoireColors.GoldPrimary.copy(alpha = haloAlpha),
                         radius = haloRadius,
                         center = Offset(cx, cy),
-                        style = Stroke(width = (2.2f * markerAdaptiveScale).coerceIn(1.2f, 4f))
+                        style = Stroke(width = haloBorderWidth)
                     )
                 }
 
                 if (r.tokenBitmap != null) {
                     val tokenSize = baseTokenSizePx * markerAdaptiveScale
                     val tokenRadius = tokenSize / 2f
+
+                    // Subtle background fill for transparent token images:
+                    drawCircle(
+                        color = GrimoireColors.SurfaceLow,
+                        radius = tokenRadius,
+                        center = Offset(cx, cy)
+                    )
+                    drawCircle(
+                        color = r.color.copy(alpha = 0.2f),
+                        radius = tokenRadius,
+                        center = Offset(cx, cy)
+                    )
+
                     val clipOval = Path().apply {
                         addOval(Rect(cx - tokenRadius, cy - tokenRadius, cx + tokenRadius, cy + tokenRadius))
                     }
@@ -342,14 +370,14 @@ fun MapMarkersCanvas(
                         color = r.color,
                         radius = tokenRadius,
                         center = Offset(cx, cy),
-                        style = Stroke(width = (2.5f * markerAdaptiveScale).coerceIn(1.5f, 5f))
+                        style = Stroke(width = tokenBorderWidth)
                     )
                     // Outer dark rim for contrast:
                     drawCircle(
                         color = Color.Black.copy(alpha = 0.45f),
-                        radius = tokenRadius + (1f * markerAdaptiveScale),
+                        radius = tokenRadius + tokenRimOffset,
                         center = Offset(cx, cy),
-                        style = Stroke(width = (1f * markerAdaptiveScale).coerceIn(0.8f, 2f))
+                        style = Stroke(width = tokenRimWidth)
                     )
                 } else {
                     val icon = r.iconBitmap
@@ -365,6 +393,12 @@ fun MapMarkersCanvas(
                             color = r.color,
                             radius = currentRadius,
                             center = Offset(cx, cy)
+                        )
+                        drawCircle(
+                            color = Color.Black.copy(alpha = 0.45f),
+                            radius = currentRadius,
+                            center = Offset(cx, cy),
+                            style = Stroke(width = dotRimWidth)
                         )
                     }
                 }
