@@ -39,13 +39,23 @@ import de.luca.dungeon_master_manager.data.AppSettingsRepository
 import de.luca.dungeon_master_manager.data.CreatableFileType
 import de.luca.dungeon_master_manager.data.EntityPopoutRequest
 import de.luca.dungeon_master_manager.data.FileExtensions
+import de.luca.dungeon_master_manager.data.KeybindingAction
+import de.luca.dungeon_master_manager.data.KeybindingRegistry
 import kotlinx.coroutines.launch
 import de.luca.dungeon_master_manager.ui.components.EditorUnifiedTopBar
 import de.luca.dungeon_master_manager.ui.components.ExplorerDropPayload
+import de.luca.dungeon_master_manager.ui.components.GrimoireShortcutDisplay
 import de.luca.dungeon_master_manager.ui.components.GrimoireTitleBar
 import de.luca.dungeon_master_manager.ui.components.GrimoireWindowFrame
 import de.luca.dungeon_master_manager.ui.components.extractExplorerPayload
 import de.luca.dungeon_master_manager.ui.components.isExplorerFileDrag
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextOverflow
+import de.luca.dungeon_master_manager.data.NewItemMode
+import de.luca.dungeon_master_manager.ui.components.ExplorerResizeHandle
+import de.luca.dungeon_master_manager.ui.components.collectAllFolderOptions
+import kotlin.math.roundToInt
 import de.luca.dungeon_master_manager.ui.theme.GrimoireColors
 import de.luca.dungeon_master_manager.ui.theme.GrimoireDivider
 import de.luca.dungeon_master_manager.ui.theme.GrimoireTheme
@@ -79,6 +89,7 @@ fun ProjectEditorScreen(
     val isLoadingContent by viewModel.isLoadingContent.collectAsState()
     val pendingConflict by viewModel.pendingConflict.collectAsState()
     val dropNotice by viewModel.dropNotice.collectAsState()
+    val targetMapMarkerId by viewModel.targetMapMarkerId.collectAsState()
 
     val activeTab = openTabs.find { it.filePath == activeTabPath }
 
@@ -113,8 +124,12 @@ fun ProjectEditorScreen(
         }
     }
 
+    val settings by AppSettingsRepository.settings.collectAsState()
+    val isFileSearchOpen by viewModel.isFileSearchOpen.collectAsState()
+    val searchShortcut = settings.shortcuts[KeybindingAction.SEARCH_FILES] ?: "Ctrl+F"
+
     if (window != null) {
-        DisposableEffect(window) {
+        DisposableEffect(window, isFileSearchOpen, searchShortcut) {
             val focusListener = object : java.awt.event.WindowFocusListener {
                 override fun windowGainedFocus(e: java.awt.event.WindowEvent?) {
                     viewModel.loadFileTree()
@@ -122,8 +137,22 @@ fun ProjectEditorScreen(
                 override fun windowLostFocus(e: java.awt.event.WindowEvent?) {}
             }
             window.addWindowFocusListener(focusListener)
+
+            val keyDispatcher = java.awt.KeyEventDispatcher { awtEvent ->
+                if (!window.isActive) return@KeyEventDispatcher false
+                if (awtEvent.id == java.awt.event.KeyEvent.KEY_PRESSED) {
+                    if (!isFileSearchOpen && KeybindingRegistry.matchesAwtEvent(awtEvent, searchShortcut)) {
+                        viewModel.openFileSearch()
+                        return@KeyEventDispatcher true
+                    }
+                }
+                false
+            }
+            java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(keyDispatcher)
+
             onDispose {
                 window.removeWindowFocusListener(focusListener)
+                java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(keyDispatcher)
             }
         }
     }
@@ -142,10 +171,22 @@ fun ProjectEditorScreen(
         list
     }
 
-    val settings by AppSettingsRepository.settings.collectAsState()
+    var showSettingsDialog by remember { mutableStateOf(false) }
+
     val coroutineScope = rememberCoroutineScope()
     var isExplorerVisible by remember(settings.isExplorerSidebarVisible) {
         mutableStateOf(settings.isExplorerSidebarVisible)
+    }
+    val density = LocalDensity.current
+    var isResizingSidebar by remember { mutableStateOf(false) }
+    var sidebarWidth by remember(settings.explorerSidebarWidth) {
+        mutableStateOf(settings.explorerSidebarWidth.dp)
+    }
+
+    LaunchedEffect(settings.explorerSidebarWidth) {
+        if (!isResizingSidebar) {
+            sidebarWidth = settings.explorerSidebarWidth.dp
+        }
     }
 
     val toggleExplorer = {
@@ -156,7 +197,18 @@ fun ProjectEditorScreen(
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(GrimoireColors.Background)) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .onPreviewKeyEvent { event ->
+                if (!isFileSearchOpen && KeybindingRegistry.matchesShortcut(event, searchShortcut)) {
+                    viewModel.openFileSearch()
+                    return@onPreviewKeyEvent true
+                }
+                false
+            }
+    ) {
+        Column(modifier = Modifier.fillMaxSize().background(GrimoireColors.Background)) {
         // Unified Top Titlebar (replaces old EditorToolbar and TabBar)
         if (window != null && windowState != null) {
             EditorUnifiedTopBar(
@@ -189,7 +241,7 @@ fun ProjectEditorScreen(
                     shrinkTowards = Alignment.Start
                 ) + fadeOut(animationSpec = tween(120))
             ) {
-                Row(modifier = Modifier.width(260.dp).fillMaxHeight()) {
+                Row(modifier = Modifier.width(sidebarWidth).fillMaxHeight()) {
                     EditorSidebar(
                         fileTree = fileTree,
                         expandedPaths = expandedPaths,
@@ -199,6 +251,7 @@ fun ProjectEditorScreen(
                         onDismissDropNotice = { viewModel.dismissDropNotice() },
                         onNodeClick = { viewModel.openFile(it) },
                         onCreateFile = { folder, file -> viewModel.createNewFile(folder, file) },
+                        onCreateFolder = { parentFolder, folderName -> viewModel.createNewFolder(parentFolder, folderName) },
                         onRenameFile = { node, newName -> viewModel.renameFile(node, newName) },
                         onMoveFile = { node, folder -> viewModel.moveFile(node, folder) },
                         onDeleteFile = { node -> viewModel.deleteFile(node) },
@@ -218,10 +271,28 @@ fun ProjectEditorScreen(
                         },
                         onManageEntities = { showEntityDialog = true },
                         onToggleCollapse = { toggleExplorer() },
+                        onOpenSearch = { viewModel.openFileSearch() },
+                        searchShortcut = searchShortcut,
                         modifier = Modifier.weight(1f).fillMaxHeight(),
                     )
 
-                    VerticalDivider(color = GrimoireColors.BorderBronze)
+                    ExplorerResizeHandle(
+                        isDragging = isResizingSidebar,
+                        onDragStart = { isResizingSidebar = true },
+                        onDragEnd = {
+                            isResizingSidebar = false
+                            coroutineScope.launch {
+                                AppSettingsRepository.setExplorerSidebarWidth(sidebarWidth.value.roundToInt())
+                            }
+                        },
+                        onHorizontalDrag = { dragAmountPx ->
+                            val deltaDp = with(density) { dragAmountPx.toDp() }
+                            sidebarWidth = (sidebarWidth + deltaDp).coerceIn(
+                                AppSettingsRepository.MIN_EXPLORER_SIDEBAR_WIDTH.dp,
+                                AppSettingsRepository.MAX_EXPLORER_SIDEBAR_WIDTH.dp
+                            )
+                        }
+                    )
                 }
             }
 
@@ -250,7 +321,9 @@ fun ProjectEditorScreen(
                                 }
                             },
                             entities = entities,
-                            projectPath = viewModel.project.path
+                            projectPath = viewModel.project.path,
+                            targetMapMarkerId = targetMapMarkerId,
+                            onMarkerFocused = { viewModel.clearTargetMapMarkerId() }
                         )
                     }
                 } else {
@@ -301,6 +374,55 @@ fun ProjectEditorScreen(
                 }
             }
         }
+    }
+
+        if (isFileSearchOpen) {
+            FileSearchOverlay(
+                searchService = viewModel.searchService,
+                openTabPaths = openTabs.map { it.filePath },
+                onClose = { viewModel.closeFileSearch() },
+                onOpenFile = { node -> viewModel.openFile(node) },
+                onOpenHeading = { path, idx -> viewModel.openHeading(path, idx) },
+                onOpenEntity = { entityName ->
+                    onOpenEntityPopout(EntityPopoutRequest(entityName, viewModel.project.path))
+                },
+                onCreateNewNote = { noteName ->
+                    viewModel.createNewFile("Story", noteName)
+                },
+                onOpenMapMarker = { mapPath, markerId ->
+                    viewModel.openMapAtMarker(mapPath, markerId)
+                },
+                onPopOutFile = { node -> viewModel.openAsWindow(node) },
+                onExecuteCommand = { cmdId ->
+                    when (cmdId) {
+                        "cmd_new_note" -> viewModel.createNewFile("Story", "New_Note.md")
+                        "cmd_new_map" -> viewModel.createNewFile("Maps", "New_Map.map")
+                        "cmd_open_explorer" -> {
+                            try {
+                                val file = java.io.File(viewModel.project.path)
+                                if (java.awt.Desktop.isDesktopSupported()) {
+                                    java.awt.Desktop.getDesktop().open(file)
+                                }
+                            } catch (_: Exception) {}
+                        }
+                        "cmd_open_settings" -> { showSettingsDialog = true }
+                        "cmd_toggle_battery" -> {
+                            coroutineScope.launch {
+                                AppSettingsRepository.setBatterySaverMode(!settings.isBatterySaverMode)
+                            }
+                        }
+                    }
+                },
+                onInsertLinkToActiveEditor = { title, relPath, _ ->
+                    viewModel.showDropNotice("Link kopiert: [$title]($relPath)", isWarning = false)
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
+
+    if (showSettingsDialog) {
+        SettingsDialog(onDismiss = { showSettingsDialog = false })
     }
 
     if (showEntityDialog) {
@@ -528,6 +650,7 @@ private fun EditorSidebar(
     onDismissDropNotice: () -> Unit,
     onNodeClick: (de.luca.dungeon_master_manager.data.FileNode) -> Unit,
     onCreateFile: (folderName: String, fileName: String) -> Unit,
+    onCreateFolder: (parentFolderName: String, folderName: String) -> Unit,
     onRenameFile: (de.luca.dungeon_master_manager.data.FileNode, String) -> Unit,
     onMoveFile: (de.luca.dungeon_master_manager.data.FileNode, String) -> Unit,
     onDeleteFile: (de.luca.dungeon_master_manager.data.FileNode) -> Unit,
@@ -538,9 +661,13 @@ private fun EditorSidebar(
     onOpenNativeExplorer: () -> Unit,
     onManageEntities: () -> Unit,
     onToggleCollapse: () -> Unit = {},
+    onOpenSearch: () -> Unit = {},
+    searchShortcut: String = "Ctrl+F",
     modifier: Modifier = Modifier,
 ) {
     var showNewFileDialog by remember { mutableStateOf(false) }
+    var newItemMode by remember { mutableStateOf(NewItemMode.FILE) }
+    var targetFolderForNewItem by remember { mutableStateOf<String?>(null) }
     var fileToRename by remember { mutableStateOf<de.luca.dungeon_master_manager.data.FileNode?>(null) }
     var fileToMove by remember { mutableStateOf<de.luca.dungeon_master_manager.data.FileNode?>(null) }
     var fileToDelete by remember { mutableStateOf<de.luca.dungeon_master_manager.data.FileNode?>(null) }
@@ -609,7 +736,22 @@ private fun EditorSidebar(
                         Text("📁", fontSize = 14.sp)
                     }
                     TextButton(
-                        onClick = { showNewFileDialog = true },
+                        onClick = {
+                            targetFolderForNewItem = null
+                            newItemMode = NewItemMode.FOLDER
+                            showNewFileDialog = true
+                        },
+                        contentPadding = PaddingValues(0.dp),
+                        modifier = Modifier.defaultMinSize(minWidth = 28.dp, minHeight = 28.dp).padding(end = 4.dp)
+                    ) {
+                        Text("📁+", fontSize = 13.sp, color = GrimoireColors.GoldPrimary, fontWeight = FontWeight.Bold)
+                    }
+                    TextButton(
+                        onClick = {
+                            targetFolderForNewItem = null
+                            newItemMode = NewItemMode.FILE
+                            showNewFileDialog = true
+                        },
                         contentPadding = PaddingValues(0.dp),
                         modifier = Modifier.defaultMinSize(minWidth = 28.dp, minHeight = 28.dp).padding(end = 4.dp)
                     ) {
@@ -628,6 +770,47 @@ private fun EditorSidebar(
                     }
                 }
             }
+
+            // Search Bar Trigger Button
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 2.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(GrimoireColors.SurfaceCard)
+                    .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(6.dp))
+                    .clickable { onOpenSearch() }
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = "🔍",
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(end = 6.dp)
+                        )
+                        Text(
+                            text = "Dateien suchen...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = GrimoireColors.ParchmentDim,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    GrimoireShortcutDisplay(shortcutString = searchShortcut)
+                }
+            }
+
+            Spacer(Modifier.height(4.dp))
 
             // Drop Notice Banner (if any)
             dropNotice?.let { notice ->
@@ -715,6 +898,26 @@ private fun EditorSidebar(
                             onMoveClick = { fileToMove = it },
                             onDeleteClick = { fileToDelete = it },
                             onPopOutClick = onPopOutClick,
+                            onNewFileClick = { node ->
+                                val rel = try {
+                                    File(node.path).relativeTo(File(projectPath)).path.replace('\\', '/')
+                                } catch (_: Exception) {
+                                    node.name
+                                }
+                                targetFolderForNewItem = rel
+                                newItemMode = NewItemMode.FILE
+                                showNewFileDialog = true
+                            },
+                            onNewFolderClick = { node ->
+                                val rel = try {
+                                    File(node.path).relativeTo(File(projectPath)).path.replace('\\', '/')
+                                } catch (_: Exception) {
+                                    node.name
+                                }
+                                targetFolderForNewItem = rel
+                                newItemMode = NewItemMode.FOLDER
+                                showNewFileDialog = true
+                            },
                         )
                     }
 
@@ -775,32 +978,51 @@ private fun EditorSidebar(
     }
 
     if (showNewFileDialog && fileTree != null) {
-        val folders: List<String> = remember(fileTree) {
-            val list = fileTree.children.filter { it.isDirectory }.map { it.name }
-            if (list.isEmpty()) listOf("") else list
+        val folderOptions = remember(fileTree, projectPath) {
+            collectAllFolderOptions(fileTree, projectPath)
         }
-        val defaultFolder: String = remember(folders, activeFilePath) {
-            val activeDirName = activeFilePath?.let { File(it).parentFile?.name }
-            if (activeDirName != null && folders.contains(activeDirName)) {
-                activeDirName
+        val defaultFolder: String = remember(folderOptions, activeFilePath, targetFolderForNewItem) {
+            if (targetFolderForNewItem != null) {
+                targetFolderForNewItem!!
             } else {
-                folders.firstOrNull() ?: ""
+                val activeRelDir = activeFilePath?.let { path ->
+                    try {
+                        val parent = File(path).parentFile
+                        val root = File(projectPath)
+                        if (parent == root) "" else parent.relativeTo(root).path.replace('\\', '/')
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+                if (activeRelDir != null && folderOptions.any { it.relativePath == activeRelDir }) {
+                    activeRelDir
+                } else {
+                    folderOptions.firstOrNull { it.relativePath.isNotEmpty() }?.relativePath ?: ""
+                }
             }
         }
         var selectedFolder by remember { mutableStateOf(defaultFolder) }
         var selectedFileType by remember {
-            mutableStateOf(FileExtensions.defaultFileTypeForFolder(defaultFolder))
+            mutableStateOf(FileExtensions.defaultFileTypeForFolder(defaultFolder.substringAfterLast('/')))
         }
-        var fileName by remember { mutableStateOf("") }
+        var itemName by remember { mutableStateOf("") }
         var expandedFolderDropdown by remember { mutableStateOf(false) }
         var expandedTypeDropdown by remember { mutableStateOf(false) }
 
-        val finalFileName = FileExtensions.sanitizeFileName(fileName, selectedFileType.extension)
-        val canCreate = finalFileName.isNotBlank() && selectedFolder.isNotBlank()
+        val finalFileName = FileExtensions.sanitizeFileName(itemName, selectedFileType.extension)
+        val sanitizedFolderName = itemName.trim().trim('/', '\\')
+
+        val canCreate = when (newItemMode) {
+            NewItemMode.FILE -> finalFileName.isNotBlank()
+            NewItemMode.FOLDER -> sanitizedFolderName.isNotBlank() && !sanitizedFolderName.contains("..")
+        }
 
         fun doCreate() {
             if (canCreate) {
-                onCreateFile(selectedFolder, finalFileName)
+                when (newItemMode) {
+                    NewItemMode.FILE -> onCreateFile(selectedFolder, finalFileName)
+                    NewItemMode.FOLDER -> onCreateFolder(selectedFolder, sanitizedFolderName)
+                }
                 showNewFileDialog = false
             }
         }
@@ -808,14 +1030,79 @@ private fun EditorSidebar(
         AlertDialog(
             onDismissRequest = { showNewFileDialog = false },
             title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(selectedFileType.icon, fontSize = 22.sp, modifier = Modifier.padding(end = 10.dp))
-                    Text(
-                        "New File",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = GrimoireColors.GoldPrimary,
-                        fontWeight = FontWeight.Bold
-                    )
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            if (newItemMode == NewItemMode.FILE) selectedFileType.icon else "📁",
+                            fontSize = 22.sp,
+                            modifier = Modifier.padding(end = 10.dp)
+                        )
+                        Text(
+                            if (newItemMode == NewItemMode.FILE) "New File" else "New Folder",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = GrimoireColors.GoldPrimary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+
+                    // Segmented tabs: File / Folder
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(GrimoireColors.SurfaceLow, RoundedCornerShape(8.dp))
+                            .border(1.dp, GrimoireColors.BorderBronze.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                            .padding(3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Surface(
+                            onClick = { newItemMode = NewItemMode.FILE },
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (newItemMode == NewItemMode.FILE) GrimoireColors.GoldContainer else Color.Transparent,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(vertical = 6.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("📄", fontSize = 14.sp)
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    "File",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (newItemMode == NewItemMode.FILE) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (newItemMode == NewItemMode.FILE) GrimoireColors.GoldBright else GrimoireColors.ParchmentMuted
+                                )
+                            }
+                        }
+
+                        Surface(
+                            onClick = { newItemMode = NewItemMode.FOLDER },
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (newItemMode == NewItemMode.FOLDER) GrimoireColors.GoldContainer else Color.Transparent,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(vertical = 6.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("📁", fontSize = 14.sp)
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    "Folder",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (newItemMode == NewItemMode.FOLDER) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (newItemMode == NewItemMode.FOLDER) GrimoireColors.GoldBright else GrimoireColors.ParchmentMuted
+                                )
+                            }
+                        }
+                    }
                 }
             },
             containerColor = GrimoireColors.SurfaceCard,
@@ -827,39 +1114,45 @@ private fun EditorSidebar(
                         .widthIn(min = 380.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    // 1. File Name field with extension suffix
+                    // 1. Name field
                     Column {
                         Text(
-                            "Name",
+                            if (newItemMode == NewItemMode.FILE) "Name" else "Folder Name",
                             style = MaterialTheme.typography.labelMedium,
                             color = GrimoireColors.ParchmentMuted,
                             fontWeight = FontWeight.Medium
                         )
                         Spacer(Modifier.height(4.dp))
                         OutlinedTextField(
-                            value = fileName,
-                            onValueChange = { fileName = it },
+                            value = itemName,
+                            onValueChange = { itemName = it },
                             placeholder = {
                                 Text(
-                                    when (selectedFileType.extension) {
-                                        "md" -> "e.g. Session 1, Chapter 2, Quest Log"
-                                        "map" -> "e.g. Castle Dungeon, Tavern, Overworld"
-                                        "txt" -> "e.g. scratchpad, notes, summary"
-                                        "json" -> "e.g. encounter_tables, config"
-                                        else -> "e.g. my_file"
+                                    if (newItemMode == NewItemMode.FILE) {
+                                        when (selectedFileType.extension) {
+                                            "md" -> "e.g. Session 1, Chapter 2, Quest Log"
+                                            "map" -> "e.g. Castle Dungeon, Tavern, Overworld"
+                                            "txt" -> "e.g. scratchpad, notes, summary"
+                                            "json" -> "e.g. encounter_tables, config"
+                                            else -> "e.g. my_file"
+                                        }
+                                    } else {
+                                        "e.g. Chapters, Dungeons, Quests, NPCs"
                                     },
                                     color = GrimoireColors.ParchmentMuted.copy(alpha = 0.5f),
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                             },
-                            suffix = {
-                                Text(
-                                    ".${selectedFileType.extension}",
-                                    color = GrimoireColors.GoldPrimary,
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                            },
+                            suffix = if (newItemMode == NewItemMode.FILE) {
+                                {
+                                    Text(
+                                        ".${selectedFileType.extension}",
+                                        color = GrimoireColors.GoldPrimary,
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
+                            } else null,
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                             keyboardActions = KeyboardActions(onDone = { doCreate() }),
@@ -881,74 +1174,76 @@ private fun EditorSidebar(
                         )
                     }
 
-                    // 2. File Type Dropdown
-                    Column {
-                        Text(
-                            "File Type",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = GrimoireColors.ParchmentMuted,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        ExposedDropdownMenuBox(
-                            expanded = expandedTypeDropdown,
-                            onExpandedChange = { expandedTypeDropdown = !expandedTypeDropdown },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            OutlinedTextField(
-                                value = "${selectedFileType.icon}  ${selectedFileType.name}",
-                                onValueChange = {},
-                                readOnly = true,
-                                trailingIcon = {
-                                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedTypeDropdown)
-                                },
-                                modifier = Modifier
-                                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
-                                    .fillMaxWidth(),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = GrimoireColors.GoldPrimary,
-                                    unfocusedBorderColor = GrimoireColors.BorderBronze,
-                                    focusedTextColor = GrimoireColors.ParchmentLight,
-                                    unfocusedTextColor = GrimoireColors.ParchmentLight,
-                                )
+                    // 2. File Type Dropdown (Only for File mode)
+                    if (newItemMode == NewItemMode.FILE) {
+                        Column {
+                            Text(
+                                "File Type",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = GrimoireColors.ParchmentMuted,
+                                fontWeight = FontWeight.Medium
                             )
-                            DropdownMenu(
+                            Spacer(Modifier.height(4.dp))
+                            ExposedDropdownMenuBox(
                                 expanded = expandedTypeDropdown,
-                                onDismissRequest = { expandedTypeDropdown = false },
-                                modifier = Modifier
-                                    .background(GrimoireColors.SurfaceCard)
-                                    .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(4.dp))
+                                onExpandedChange = { expandedTypeDropdown = !expandedTypeDropdown },
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                FileExtensions.CREATABLE_FILE_TYPES.forEach { fileType ->
-                                    val isSelected = fileType.extension == selectedFileType.extension
-                                    DropdownMenuItem(
-                                        leadingIcon = {
-                                            Text(fileType.icon, fontSize = 20.sp)
-                                        },
-                                        text = {
-                                            Column(modifier = Modifier.padding(vertical = 2.dp)) {
-                                                Text(
-                                                    fileType.name,
-                                                    color = if (isSelected) GrimoireColors.GoldPrimary else GrimoireColors.ParchmentLight,
-                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
-                                                    style = MaterialTheme.typography.bodyMedium
-                                                )
-                                                Text(
-                                                    fileType.description,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = GrimoireColors.ParchmentMuted,
-                                                    fontSize = 12.sp
-                                                )
-                                            }
-                                        },
-                                        onClick = {
-                                            selectedFileType = fileType
-                                            expandedTypeDropdown = false
-                                        },
-                                        modifier = Modifier.background(
-                                            if (isSelected) GrimoireColors.GoldContainer.copy(alpha = 0.25f) else Color.Transparent
-                                        )
+                                OutlinedTextField(
+                                    value = "${selectedFileType.icon}  ${selectedFileType.name}",
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    trailingIcon = {
+                                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedTypeDropdown)
+                                    },
+                                    modifier = Modifier
+                                        .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
+                                        .fillMaxWidth(),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = GrimoireColors.GoldPrimary,
+                                        unfocusedBorderColor = GrimoireColors.BorderBronze,
+                                        focusedTextColor = GrimoireColors.ParchmentLight,
+                                        unfocusedTextColor = GrimoireColors.ParchmentLight,
                                     )
+                                )
+                                DropdownMenu(
+                                    expanded = expandedTypeDropdown,
+                                    onDismissRequest = { expandedTypeDropdown = false },
+                                    modifier = Modifier
+                                        .background(GrimoireColors.SurfaceCard)
+                                        .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(4.dp))
+                                ) {
+                                    FileExtensions.CREATABLE_FILE_TYPES.forEach { fileType ->
+                                        val isSelected = fileType.extension == selectedFileType.extension
+                                        DropdownMenuItem(
+                                            leadingIcon = {
+                                                Text(fileType.icon, fontSize = 20.sp)
+                                            },
+                                            text = {
+                                                Column(modifier = Modifier.padding(vertical = 2.dp)) {
+                                                    Text(
+                                                        fileType.name,
+                                                        color = if (isSelected) GrimoireColors.GoldPrimary else GrimoireColors.ParchmentLight,
+                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                                        style = MaterialTheme.typography.bodyMedium
+                                                    )
+                                                    Text(
+                                                        fileType.description,
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = GrimoireColors.ParchmentMuted,
+                                                        fontSize = 12.sp
+                                                    )
+                                                }
+                                            },
+                                            onClick = {
+                                                selectedFileType = fileType
+                                                expandedTypeDropdown = false
+                                            },
+                                            modifier = Modifier.background(
+                                                if (isSelected) GrimoireColors.GoldContainer.copy(alpha = 0.25f) else Color.Transparent
+                                            )
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -957,7 +1252,7 @@ private fun EditorSidebar(
                     // 3. Destination Folder Dropdown
                     Column {
                         Text(
-                            "Destination Folder",
+                            if (newItemMode == NewItemMode.FILE) "Destination Folder" else "Create in Folder",
                             style = MaterialTheme.typography.labelMedium,
                             color = GrimoireColors.ParchmentMuted,
                             fontWeight = FontWeight.Medium
@@ -969,7 +1264,7 @@ private fun EditorSidebar(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             OutlinedTextField(
-                                value = if (selectedFolder.isNotBlank()) "📁  $selectedFolder" else "(Project Root)",
+                                value = if (selectedFolder.isNotBlank()) "📁  $selectedFolder" else "📦  (Project Root)",
                                 onValueChange = {},
                                 readOnly = true,
                                 trailingIcon = {
@@ -991,23 +1286,34 @@ private fun EditorSidebar(
                                 modifier = Modifier
                                     .background(GrimoireColors.SurfaceCard)
                                     .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(4.dp))
+                                    .heightIn(max = 280.dp)
                             ) {
-                                folders.forEach { folder ->
-                                    val isSelected = folder == selectedFolder
+                                folderOptions.forEach { option ->
+                                    val isSelected = option.relativePath == selectedFolder
                                     DropdownMenuItem(
-                                        leadingIcon = { Text("📁", fontSize = 16.sp) },
+                                        leadingIcon = {
+                                            Text(if (option.depth == 0) "📦" else "📁", fontSize = 16.sp)
+                                        },
                                         text = {
-                                            Text(
-                                                folder,
-                                                color = if (isSelected) GrimoireColors.GoldPrimary else GrimoireColors.ParchmentLight,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                            )
+                                            Row(
+                                                modifier = Modifier.padding(start = (option.depth * 14).dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                if (option.depth > 0) {
+                                                    Text("↳ ", color = GrimoireColors.BorderBronze, fontSize = 12.sp)
+                                                }
+                                                Text(
+                                                    option.displayName,
+                                                    color = if (isSelected) GrimoireColors.GoldPrimary else GrimoireColors.ParchmentLight,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                                )
+                                            }
                                         },
                                         onClick = {
-                                            selectedFolder = folder
+                                            selectedFolder = option.relativePath
                                             expandedFolderDropdown = false
-                                            if (fileName.isBlank()) {
-                                                selectedFileType = FileExtensions.defaultFileTypeForFolder(folder)
+                                            if (newItemMode == NewItemMode.FILE && itemName.isBlank()) {
+                                                selectedFileType = FileExtensions.defaultFileTypeForFolder(option.displayName)
                                             }
                                         },
                                         modifier = Modifier.background(
@@ -1020,10 +1326,18 @@ private fun EditorSidebar(
                     }
 
                     // 4. Live Preview Box
-                    val previewPath = if (finalFileName.isNotBlank()) {
-                        if (selectedFolder.isNotBlank()) "$selectedFolder/$finalFileName" else finalFileName
+                    val previewPath = if (newItemMode == NewItemMode.FILE) {
+                        if (finalFileName.isNotBlank()) {
+                            if (selectedFolder.isNotBlank()) "$selectedFolder/$finalFileName" else finalFileName
+                        } else {
+                            if (selectedFolder.isNotBlank()) "$selectedFolder/<name>.${selectedFileType.extension}" else "<name>.${selectedFileType.extension}"
+                        }
                     } else {
-                        if (selectedFolder.isNotBlank()) "$selectedFolder/<name>.${selectedFileType.extension}" else "<name>.${selectedFileType.extension}"
+                        if (sanitizedFolderName.isNotBlank()) {
+                            if (selectedFolder.isNotBlank()) "$selectedFolder/$sanitizedFolderName/" else "$sanitizedFolderName/"
+                        } else {
+                            if (selectedFolder.isNotBlank()) "$selectedFolder/<folder_name>/" else "<folder_name>/"
+                        }
                     }
 
                     Surface(
@@ -1045,7 +1359,7 @@ private fun EditorSidebar(
                                 previewPath,
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.SemiBold,
-                                color = if (finalFileName.isNotBlank()) GrimoireColors.GoldBright else GrimoireColors.ParchmentMuted
+                                color = if (canCreate) GrimoireColors.GoldBright else GrimoireColors.ParchmentMuted
                             )
                         }
                     }
@@ -1062,7 +1376,10 @@ private fun EditorSidebar(
                         disabledContentColor = GrimoireColors.ParchmentMuted.copy(alpha = 0.5f)
                     )
                 ) {
-                    Text("Create File", fontWeight = FontWeight.Bold)
+                    Text(
+                        if (newItemMode == NewItemMode.FILE) "Create File" else "Create Folder",
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             },
             dismissButton = {
@@ -1184,8 +1501,12 @@ private fun EditorSidebar(
     }
 
     if (fileToMove != null && fileTree != null) {
-        val folders = fileTree.children.filter { it.isDirectory }.map { it.name }
-        var selectedFolder by remember { mutableStateOf(folders.firstOrNull() ?: "") }
+        val folderOptions = remember(fileTree, projectPath) {
+            collectAllFolderOptions(fileTree, projectPath)
+        }
+        var selectedFolder by remember {
+            mutableStateOf(folderOptions.firstOrNull { it.relativePath.isNotEmpty() }?.relativePath ?: "")
+        }
         AlertDialog(
             onDismissRequest = { fileToMove = null },
             title = { Text("Move File", style = MaterialTheme.typography.titleLarge, color = GrimoireColors.GoldPrimary) },
@@ -1199,27 +1520,40 @@ private fun EditorSidebar(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 150.dp)
+                            .heightIn(max = 220.dp)
                             .verticalScroll(scrollState)
                     ) {
-                        folders.forEach { folder ->
+                        folderOptions.forEach { option ->
+                            val isSelected = selectedFolder == option.relativePath
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { selectedFolder = folder }
-                                    .padding(vertical = 4.dp)
-                                ) {
+                                    .clickable { selectedFolder = option.relativePath }
+                                    .padding(vertical = 4.dp, horizontal = 4.dp)
+                            ) {
                                 RadioButton(
-                                    selected = (selectedFolder == folder),
-                                    onClick = { selectedFolder = folder },
+                                    selected = isSelected,
+                                    onClick = { selectedFolder = option.relativePath },
                                     colors = RadioButtonDefaults.colors(
                                         selectedColor = GrimoireColors.GoldPrimary,
                                         unselectedColor = GrimoireColors.BorderBronze
                                     )
                                 )
                                 Spacer(Modifier.width(8.dp))
-                                Text(folder, color = GrimoireColors.ParchmentLight)
+                                Row(
+                                    modifier = Modifier.padding(start = (option.depth * 14).dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (option.depth > 0) {
+                                        Text("↳ ", color = GrimoireColors.BorderBronze, fontSize = 12.sp)
+                                    }
+                                    Text(
+                                        if (option.depth == 0) "📦 (Project Root)" else "📁 ${option.displayName}",
+                                        color = if (isSelected) GrimoireColors.GoldBright else GrimoireColors.ParchmentLight,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                }
                             }
                         }
                     }
@@ -1228,10 +1562,8 @@ private fun EditorSidebar(
             confirmButton = {
                 Button(
                     onClick = {
-                        if (selectedFolder.isNotBlank()) {
-                            onMoveFile(fileToMove!!, selectedFolder)
-                            fileToMove = null
-                        }
+                        onMoveFile(fileToMove!!, selectedFolder)
+                        fileToMove = null
                     },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = GrimoireColors.GoldPrimary,

@@ -76,11 +76,54 @@ class ProjectEditorViewModel(
     private val _dropNotice = MutableStateFlow<ExplorerDropNotice?>(null)
     val dropNotice: StateFlow<ExplorerDropNotice?> = _dropNotice
 
+    val searchService = de.luca.dungeon_master_manager.data.UniversalSearchService(project.path)
+    private val _isFileSearchOpen = MutableStateFlow(false)
+    val isFileSearchOpen: StateFlow<Boolean> = _isFileSearchOpen
+
+    private val _targetMapMarkerId = MutableStateFlow<String?>(null)
+    val targetMapMarkerId: StateFlow<String?> = _targetMapMarkerId
+
     private var noticeDismissJob: Job? = null
 
     init {
         loadFileTree()
         loadEntityColors()
+    }
+
+    fun openFileSearch() {
+        searchService.invalidateCache()
+        _isFileSearchOpen.value = true
+    }
+
+    fun closeFileSearch() {
+        _isFileSearchOpen.value = false
+    }
+
+    fun toggleFileSearch() {
+        if (_isFileSearchOpen.value) {
+            closeFileSearch()
+        } else {
+            openFileSearch()
+        }
+    }
+
+    fun openHeading(filePath: String, headingIndex: Int) {
+        val file = File(filePath)
+        if (file.exists()) {
+            openFile(FileNode(name = file.name, path = file.absolutePath, isDirectory = false))
+        }
+    }
+
+    fun openMapAtMarker(mapFilePath: String, markerId: String) {
+        _targetMapMarkerId.value = markerId
+        val file = File(mapFilePath)
+        if (file.exists()) {
+            openFile(FileNode(name = file.name, path = file.absolutePath, isDirectory = false))
+        }
+    }
+
+    fun clearTargetMapMarkerId() {
+        _targetMapMarkerId.value = null
     }
 
     fun showDropNotice(message: String, isWarning: Boolean = true) {
@@ -365,39 +408,80 @@ class ProjectEditorViewModel(
         }
     }
 
-    /** Create a new file in the specified root folder and open it */
+    /** Create a new file in the specified folder (or project root) and open it */
     fun createNewFile(folderName: String, fileName: String) {
         viewModelScope.launch {
             try {
                 val safeName = if (fileName.contains(".")) fileName else "$fileName.md"
-                val folderPath = "${project.path}${File.separator}$folderName"
-                val newFile = File(folderPath, safeName)
+                val targetDir = if (folderName.isBlank() || folderName == "/") {
+                    File(project.path)
+                } else {
+                    File(project.path, folderName)
+                }
+                val newFile = File(targetDir, safeName)
                 
-                if (!newFile.exists()) {
-                    newFile.parentFile?.mkdirs()
-                    newFile.createNewFile()
-                    
-                    if (safeName.endsWith(".md", ignoreCase = true)) {
-                        val title = safeName.substringBeforeLast('.')
-                        fileService.writeFile(newFile.absolutePath, "# $title\n\n")
-                    } else if (safeName.endsWith(".map", ignoreCase = true)) {
-                        fileService.writeFile(newFile.absolutePath, "{\"imagePath\": \"\", \"markers\": []}")
-                    } else {
-                        fileService.writeFile(newFile.absolutePath, "")
-                    }
-                    
+                if (newFile.exists()) {
+                    showDropNotice("Datei '$safeName' existiert bereits.")
+                    return@launch
+                }
+
+                newFile.parentFile?.mkdirs()
+                newFile.createNewFile()
+                
+                if (safeName.endsWith(".md", ignoreCase = true)) {
+                    val title = safeName.substringBeforeLast('.')
+                    fileService.writeFile(newFile.absolutePath, "# $title\n\n")
+                } else if (safeName.endsWith(".map", ignoreCase = true)) {
+                    fileService.writeFile(newFile.absolutePath, "{\"imagePath\": \"\", \"markers\": []}")
+                } else {
+                    fileService.writeFile(newFile.absolutePath, "")
+                }
+                
+                loadFileTree()
+                expandTargetDir(newFile.parentFile.absolutePath)
+                
+                // Switch to the newly created file tab
+                val newNode = FileNode(
+                    name = newFile.name,
+                    path = newFile.absolutePath,
+                    isDirectory = false
+                )
+                openFile(newNode)
+                showDropNotice("Datei '$safeName' erstellt.", isWarning = false)
+            } catch (e: Exception) {
+                showDropNotice("Fehler beim Erstellen der Datei: ${e.message}")
+            }
+        }
+    }
+
+    /** Create a new directory in the specified folder (or project root) */
+    fun createNewFolder(parentRelativePath: String, folderName: String) {
+        viewModelScope.launch {
+            try {
+                val cleanName = folderName.trim().trim('/', '\\')
+                if (cleanName.isBlank()) return@launch
+
+                val targetDir = if (parentRelativePath.isBlank() || parentRelativePath == "/") {
+                    File(project.path)
+                } else {
+                    File(project.path, parentRelativePath)
+                }
+
+                val newDir = File(targetDir, cleanName)
+                if (newDir.exists()) {
+                    showDropNotice("Ordner '$cleanName' existiert bereits.")
+                    return@launch
+                }
+
+                if (newDir.mkdirs()) {
                     loadFileTree()
-                    
-                    // Switch to the newly created file tab
-                    val newNode = FileNode(
-                        name = newFile.name,
-                        path = newFile.absolutePath,
-                        isDirectory = false
-                    )
-                    openFile(newNode)
+                    expandTargetDir(newDir.absolutePath)
+                    showDropNotice("Ordner '$cleanName' erstellt.", isWarning = false)
+                } else {
+                    showDropNotice("Konnte Ordner '$cleanName' nicht erstellen.")
                 }
             } catch (e: Exception) {
-                // Ignore for now
+                showDropNotice("Fehler beim Erstellen des Ordners: ${e.message}")
             }
         }
     }

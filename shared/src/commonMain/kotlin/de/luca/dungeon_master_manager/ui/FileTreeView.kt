@@ -68,6 +68,8 @@ fun FileTreeView(
     onMoveClick: (FileNode) -> Unit,
     onDeleteClick: (FileNode) -> Unit,
     onPopOutClick: (FileNode) -> Unit,
+    onNewFileClick: ((FileNode) -> Unit)? = null,
+    onNewFolderClick: ((FileNode) -> Unit)? = null,
     hoveredDropFolderPath: String? = null,
     onDropTargetHoverChange: (folderPath: String?, isEntered: Boolean) -> Unit = { _, _ -> },
     onPayloadDropped: (payload: ExplorerDropPayload, targetFolderPath: String) -> Boolean = { _, _ -> false },
@@ -90,6 +92,8 @@ fun FileTreeView(
                 onMoveClick = onMoveClick,
                 onDeleteClick = onDeleteClick,
                 onPopOutClick = onPopOutClick,
+                onNewFileClick = onNewFileClick,
+                onNewFolderClick = onNewFolderClick,
             )
         }
     }
@@ -111,6 +115,8 @@ private fun FileTreeNodeRow(
     onMoveClick: (FileNode) -> Unit,
     onDeleteClick: (FileNode) -> Unit,
     onPopOutClick: (FileNode) -> Unit,
+    onNewFileClick: ((FileNode) -> Unit)? = null,
+    onNewFolderClick: ((FileNode) -> Unit)? = null,
 ) {
     val isExpanded = node.path in expandedPaths
     val isActive = node.path == activeFilePath
@@ -283,7 +289,22 @@ private fun FileTreeNodeRow(
                     .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(4.dp))
             ) {
                 if (!node.isVirtualHeading) {
-                    if (!node.isDirectory) {
+                    if (node.isDirectory) {
+                        DropdownMenuItem(
+                            text = { Text("New File...", color = GrimoireColors.GoldPrimary) },
+                            onClick = {
+                                showMenu = false
+                                onNewFileClick?.invoke(node)
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("New Folder...", color = GrimoireColors.GoldPrimary) },
+                            onClick = {
+                                showMenu = false
+                                onNewFolderClick?.invoke(node)
+                            }
+                        )
+                    } else {
                         DropdownMenuItem(
                             text = { Text("Open as window", color = GrimoireColors.ParchmentLight) },
                             onClick = {
@@ -345,6 +366,8 @@ private fun FileTreeNodeRow(
                         onMoveClick = onMoveClick,
                         onDeleteClick = onDeleteClick,
                         onPopOutClick = onPopOutClick,
+                        onNewFileClick = onNewFileClick,
+                        onNewFolderClick = onNewFolderClick,
                     )
                 }
             }

@@ -1,5 +1,10 @@
 package de.luca.dungeon_master_manager.data
 
+enum class NewItemMode {
+    FILE,
+    FOLDER,
+}
+
 data class CreatableFileType(
     val extension: String,
     val name: String,

@@ -36,7 +36,9 @@ fun ContentArea(
     onOpenEntityPopout: (String) -> Unit = {},
     onOpenImageInTab: (String) -> Unit = {},
     entities: List<de.luca.dungeonmastermanager.database.Entity> = emptyList(),
-    projectPath: String = ""
+    projectPath: String = "",
+    targetMapMarkerId: String? = null,
+    onMarkerFocused: (() -> Unit)? = null
 ) {
     Box(modifier = modifier.fillMaxSize().clipToBounds()) {
         when {
@@ -91,7 +93,9 @@ fun ContentArea(
                                 projectPath = projectPath,
                                 content = fileContent ?: "",
                                 onContentChange = onContentChange,
-                                onOpenEntityPopout = onOpenEntityPopout
+                                onOpenEntityPopout = onOpenEntityPopout,
+                                initialFocusMarkerId = targetMapMarkerId,
+                                onMarkerFocused = onMarkerFocused
                             )
                         }
                         FileExtensions.isImage(activeTab.extension) -> key(activeTab.filePath) {

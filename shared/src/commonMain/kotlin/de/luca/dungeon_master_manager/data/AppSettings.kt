@@ -8,5 +8,7 @@ data class AppSettings(
     val editorFontSize: Int = 16,
     val entityViewMode: String = "GRID",
     val isEditorTimelineVisible: Boolean = true,
-    val isExplorerSidebarVisible: Boolean = true
+    val isExplorerSidebarVisible: Boolean = true,
+    val explorerSidebarWidth: Int = 260,
+    val shortcuts: Map<String, String> = KeybindingRegistry.defaultShortcuts()
 )

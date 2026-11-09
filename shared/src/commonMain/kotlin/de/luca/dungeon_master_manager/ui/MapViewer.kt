@@ -86,7 +86,9 @@ fun MapViewer(
     projectPath: String,
     content: String,
     onContentChange: (String) -> Unit,
-    onOpenEntityPopout: (String) -> Unit
+    onOpenEntityPopout: (String) -> Unit,
+    initialFocusMarkerId: String? = null,
+    onMarkerFocused: (() -> Unit)? = null
 ) {
     val json = remember { Json { ignoreUnknownKeys = true } }
 
@@ -274,6 +276,18 @@ fun MapViewer(
                     scale = startScale + (targetScale - startScale) * value
                     offsetX = startX + (targetOffsetX - startX) * value
                     offsetY = startY + (targetOffsetY - startY) * value
+                }
+            }
+        }
+
+        LaunchedEffect(initialFocusMarkerId, viewportSize, isLoaded, mapData.markers) {
+            val markerId = initialFocusMarkerId
+            if (markerId != null && viewportSize.width > 0 && viewportSize.height > 0) {
+                val marker = mapData.markers.find { it.id == markerId }
+                if (marker != null) {
+                    delay(150)
+                    focusOnMarker(marker)
+                    onMarkerFocused?.invoke()
                 }
             }
         }

@@ -41,6 +41,10 @@ object AppSettingsRepository {
         }
     }
 
+    const val DEFAULT_EXPLORER_SIDEBAR_WIDTH = 260
+    const val MIN_EXPLORER_SIDEBAR_WIDTH = 180
+    const val MAX_EXPLORER_SIDEBAR_WIDTH = 650
+
     const val DEFAULT_EDITOR_FONT_SIZE = 16
     const val MIN_EDITOR_FONT_SIZE = 10
     const val MAX_EDITOR_FONT_SIZE = 32
@@ -68,6 +72,30 @@ object AppSettingsRepository {
 
     suspend fun setExplorerSidebarVisible(visible: Boolean) {
         updateSettings { it.copy(isExplorerSidebarVisible = visible) }
+    }
+
+    suspend fun setExplorerSidebarWidth(width: Int) {
+        val clamped = width.coerceIn(MIN_EXPLORER_SIDEBAR_WIDTH, MAX_EXPLORER_SIDEBAR_WIDTH)
+        updateSettings { it.copy(explorerSidebarWidth = clamped) }
+    }
+
+    fun getShortcut(actionId: String): String {
+        return _settings.value.shortcuts[actionId]
+            ?: KeybindingRegistry.ALL.find { it.id == actionId }?.defaultShortcut
+            ?: "Ctrl+F"
+    }
+
+    suspend fun setShortcut(actionId: String, shortcut: String) {
+        updateSettings { current ->
+            val updated = current.shortcuts.toMutableMap()
+            updated[actionId] = shortcut
+            current.copy(shortcuts = updated)
+        }
+    }
+
+    suspend fun resetShortcut(actionId: String) {
+        val default = KeybindingRegistry.ALL.find { it.id == actionId }?.defaultShortcut ?: return
+        setShortcut(actionId, default)
     }
 
     suspend fun updateSettings(transform: (AppSettings) -> AppSettings) = withContext(Dispatchers.IO) {
