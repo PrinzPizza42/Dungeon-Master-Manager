@@ -1,8 +1,10 @@
 package de.luca.dungeon_master_manager.ui
 
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -15,11 +17,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.SpanStyle
@@ -65,6 +71,15 @@ fun FileSearchOverlay(
 
     val focusRequester = remember { FocusRequester() }
     val lazyListState = rememberLazyListState()
+
+    // Dialog scale/drop entrance animation (snappy 150ms)
+    val dialogAnim = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        dialogAnim.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing)
+        )
+    }
 
     // Trigger search with debounce
     LaunchedEffect(query, selectedScope, openTabPaths) {
@@ -285,12 +300,22 @@ fun FileSearchOverlay(
         contentAlignment = Alignment.TopCenter
     ) {
         // Floating Dialog
+        val cardScale = 0.96f + 0.04f * dialogAnim.value
+        val cardOffsetY = -18.dp * (1f - dialogAnim.value)
+        val cardAlpha = dialogAnim.value
+
         GrimoireCard(
             modifier = Modifier
                 .padding(top = 70.dp, bottom = 40.dp)
                 .widthIn(min = 680.dp, max = 860.dp)
                 .fillMaxWidth(0.72f)
                 .heightIn(min = 440.dp, max = 560.dp)
+                .graphicsLayer {
+                    scaleX = cardScale
+                    scaleY = cardScale
+                    translationY = cardOffsetY.toPx()
+                    alpha = cardAlpha
+                }
                 .clickable(
                     indication = null,
                     interactionSource = remember { MutableInteractionSource() }
@@ -301,6 +326,18 @@ fun FileSearchOverlay(
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 // 1. TOP BAR: Search Input & Scope Pills
+                var isInputFocused by remember { mutableStateOf(false) }
+                val searchIconScale by animateFloatAsState(
+                    targetValue = if (isSearching) 1.18f else if (isInputFocused) 1.08f else 1.0f,
+                    animationSpec = tween(130, easing = FastOutSlowInEasing),
+                    label = "SearchIconScale"
+                )
+                val searchIconRotation by animateFloatAsState(
+                    targetValue = if (isSearching) 12f else 0f,
+                    animationSpec = tween(130, easing = FastOutSlowInEasing),
+                    label = "SearchIconRotation"
+                )
+
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -310,7 +347,13 @@ fun FileSearchOverlay(
                     Text(
                         text = "🔍",
                         fontSize = 16.sp,
-                        modifier = Modifier.padding(end = 10.dp)
+                        modifier = Modifier
+                            .padding(end = 10.dp)
+                            .graphicsLayer {
+                                scaleX = searchIconScale
+                                scaleY = searchIconScale
+                                rotationZ = searchIconRotation
+                            }
                     )
 
                     BasicTextField(
@@ -318,7 +361,8 @@ fun FileSearchOverlay(
                         onValueChange = { query = it },
                         modifier = Modifier
                             .weight(1f)
-                            .focusRequester(focusRequester),
+                            .focusRequester(focusRequester)
+                            .onFocusChanged { isInputFocused = it.isFocused },
                         textStyle = TextStyle(
                             color = GrimoireColors.ParchmentLight,
                             fontSize = 15.sp,
@@ -342,7 +386,11 @@ fun FileSearchOverlay(
                         }
                     )
 
-                    if (query.isNotEmpty()) {
+                    AnimatedVisibility(
+                        visible = query.isNotEmpty(),
+                        enter = fadeIn(animationSpec = tween(100)) + scaleIn(initialScale = 0.7f, animationSpec = tween(100)),
+                        exit = fadeOut(animationSpec = tween(80)) + scaleOut(targetScale = 0.7f, animationSpec = tween(80))
+                    ) {
                         IconButton(
                             onClick = { query = "" },
                             modifier = Modifier.size(24.dp).padding(end = 6.dp)
@@ -374,7 +422,7 @@ fun FileSearchOverlay(
                     }
                 }
 
-                HorizontalDivider(color = GrimoireColors.BorderBronzeSubtle)
+                SearchLoadingBar(isSearching = isSearching)
 
                 // 2. BODY: Result List + Preview Pane (Split View)
                 Row(
@@ -436,10 +484,28 @@ fun FileSearchOverlay(
                             .fillMaxHeight()
                             .background(GrimoireColors.SurfaceLow.copy(alpha = 0.5f))
                     ) {
-                        SearchPreviewPane(
-                            item = selectedItem,
-                            modifier = Modifier.fillMaxSize().padding(14.dp)
-                        )
+                        AnimatedContent(
+                            targetState = Pair(selectedIndex, selectedItem),
+                            transitionSpec = {
+                                val isMovingDown = targetState.first >= initialState.first
+                                val slideInOffset = if (isMovingDown) { height: Int -> height / 24 } else { height: Int -> -height / 24 }
+                                val slideOutOffset = if (isMovingDown) { height: Int -> -height / 28 } else { height: Int -> height / 28 }
+
+                                (fadeIn(animationSpec = tween(130, easing = FastOutSlowInEasing)) +
+                                 slideInVertically(animationSpec = tween(130, easing = FastOutSlowInEasing), initialOffsetY = slideInOffset))
+                                    .togetherWith(
+                                        fadeOut(animationSpec = tween(70, easing = FastOutSlowInEasing)) +
+                                        slideOutVertically(animationSpec = tween(70, easing = FastOutSlowInEasing), targetOffsetY = slideOutOffset)
+                                    )
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                            label = "PreviewTransition"
+                        ) { (_, currentItem) ->
+                            SearchPreviewPane(
+                                item = currentItem,
+                                modifier = Modifier.fillMaxSize().padding(14.dp)
+                            )
+                        }
                     }
                 }
 
@@ -541,11 +607,21 @@ fun FileSearchOverlay(
                     }
 
                     // Esc button / label on the right side
+                    val escInteractionSource = remember { MutableInteractionSource() }
+                    val isEscHovered by escInteractionSource.collectIsHoveredAsState()
+                    val escBg by animateColorAsState(
+                        targetValue = if (isEscHovered) GrimoireColors.SurfaceHover else Color.Transparent,
+                        animationSpec = tween(100),
+                        label = "EscBg"
+                    )
+
                     Row(
                         modifier = Modifier
                             .padding(start = 12.dp)
                             .clip(RoundedCornerShape(4.dp))
-                            .clickable { onClose() }
+                            .background(escBg)
+                            .hoverable(escInteractionSource)
+                            .clickable(interactionSource = escInteractionSource, indication = null) { onClose() }
                             .padding(horizontal = 4.dp, vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -554,7 +630,7 @@ fun FileSearchOverlay(
                         Text(
                             text = "Close",
                             fontSize = 11.sp,
-                            color = GrimoireColors.ParchmentDim,
+                            color = if (isEscHovered) GrimoireColors.ParchmentLight else GrimoireColors.ParchmentDim,
                             maxLines = 1,
                             softWrap = false
                         )
@@ -572,22 +648,31 @@ private fun SearchResultRow(
     onClick: () -> Unit,
     onDoubleClick: () -> Unit
 ) {
-    val background = if (isSelected) GrimoireColors.GoldContainer.copy(alpha = 0.5f) else Color.Transparent
-    val borderModifier = if (isSelected) {
-        Modifier.border(1.dp, GrimoireColors.GoldPrimary, RoundedCornerShape(6.dp))
-    } else {
-        Modifier
-    }
+    val animBg by animateColorAsState(
+        targetValue = if (isSelected) GrimoireColors.GoldContainer.copy(alpha = 0.5f) else Color.Transparent,
+        animationSpec = tween(100, easing = FastOutSlowInEasing),
+        label = "RowBg"
+    )
+    val animBorder by animateColorAsState(
+        targetValue = if (isSelected) GrimoireColors.GoldPrimary else Color.Transparent,
+        animationSpec = tween(100, easing = FastOutSlowInEasing),
+        label = "RowBorder"
+    )
+    val paddingStart by animateDpAsState(
+        targetValue = if (isSelected) 10.dp else 8.dp,
+        animationSpec = tween(100, easing = FastOutSlowInEasing),
+        label = "RowPadding"
+    )
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 2.dp)
             .clip(RoundedCornerShape(6.dp))
-            .background(background)
-            .then(borderModifier)
+            .background(animBg)
+            .border(1.dp, animBorder, RoundedCornerShape(6.dp))
             .clickable { onClick() }
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .padding(start = paddingStart, end = 8.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Leading Icon / Thumbnail
@@ -1151,28 +1236,104 @@ private fun HighlightedText(
 }
 
 @Composable
+private fun SearchLoadingBar(
+    isSearching: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(2.dp)
+            .background(GrimoireColors.BorderBronzeSubtle)
+    ) {
+        val infiniteTransition = rememberInfiniteTransition(label = "SearchLoadingTransition")
+        val progress by infiniteTransition.animateFloat(
+            initialValue = -0.4f,
+            targetValue = 1.4f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 650, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "SearchLoadingProgress"
+        )
+
+        AnimatedVisibility(
+            visible = isSearching,
+            enter = fadeIn(animationSpec = tween(80)),
+            exit = fadeOut(animationSpec = tween(120))
+        ) {
+            Spacer(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .drawBehind {
+                        val barWidth = size.width * 0.35f
+                        val startX = (size.width + barWidth) * progress - barWidth
+                        drawRect(
+                            brush = Brush.horizontalGradient(
+                                colors = listOf(
+                                    Color.Transparent,
+                                    GrimoireColors.GoldPrimary.copy(alpha = 0.4f),
+                                    GrimoireColors.GoldBright,
+                                    GrimoireColors.GoldPrimary.copy(alpha = 0.4f),
+                                    Color.Transparent
+                                ),
+                                startX = startX,
+                                endX = startX + barWidth
+                            )
+                        )
+                    }
+            )
+        }
+    }
+}
+
+@Composable
 private fun ScopePill(
     label: String,
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isHovered by interactionSource.collectIsHoveredAsState()
+
+    val targetBg = when {
+        isSelected -> GrimoireColors.GoldContainer
+        isHovered -> GrimoireColors.SurfaceHover
+        else -> GrimoireColors.SurfaceLow
+    }
+    val targetBorder = when {
+        isSelected -> GrimoireColors.GoldPrimary
+        isHovered -> GrimoireColors.BorderBronze
+        else -> GrimoireColors.BorderBronzeSubtle
+    }
+    val targetText = when {
+        isSelected -> GrimoireColors.GoldBright
+        isHovered -> GrimoireColors.ParchmentLight
+        else -> GrimoireColors.ParchmentMuted
+    }
+
+    val animatedBg by animateColorAsState(targetBg, animationSpec = tween(120), label = "PillBg")
+    val animatedBorder by animateColorAsState(targetBorder, animationSpec = tween(120), label = "PillBorder")
+    val animatedText by animateColorAsState(targetText, animationSpec = tween(120), label = "PillText")
+
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(4.dp))
-            .background(if (isSelected) GrimoireColors.GoldContainer else GrimoireColors.SurfaceLow)
+            .background(animatedBg)
             .border(
                 1.dp,
-                if (isSelected) GrimoireColors.GoldPrimary else GrimoireColors.BorderBronzeSubtle,
+                animatedBorder,
                 RoundedCornerShape(4.dp)
             )
-            .clickable { onClick() }
+            .hoverable(interactionSource)
+            .clickable(interactionSource = interactionSource, indication = null) { onClick() }
             .padding(horizontal = 8.dp, vertical = 3.dp)
     ) {
         Text(
             text = label,
             fontSize = 11.sp,
             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-            color = if (isSelected) GrimoireColors.GoldBright else GrimoireColors.ParchmentMuted
+            color = animatedText
         )
     }
 }
@@ -1183,10 +1344,20 @@ private fun ActionBadgeButton(
     label: String,
     onClick: () -> Unit
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isHovered by interactionSource.collectIsHoveredAsState()
+    val bgColor by animateColorAsState(
+        targetValue = if (isHovered) GrimoireColors.SurfaceHover else Color.Transparent,
+        animationSpec = tween(100),
+        label = "ActionBadgeBg"
+    )
+
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(4.dp))
-            .clickable { onClick() }
+            .background(bgColor)
+            .hoverable(interactionSource)
+            .clickable(interactionSource = interactionSource, indication = null) { onClick() }
             .padding(horizontal = 4.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -1195,7 +1366,7 @@ private fun ActionBadgeButton(
         Text(
             text = label,
             fontSize = 11.sp,
-            color = GrimoireColors.ParchmentLight
+            color = if (isHovered) GrimoireColors.GoldBright else GrimoireColors.ParchmentLight
         )
     }
 }

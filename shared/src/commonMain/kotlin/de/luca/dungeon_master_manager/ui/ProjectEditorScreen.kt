@@ -1,7 +1,9 @@
 package de.luca.dungeon_master_manager.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
@@ -9,6 +11,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.*
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -19,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.font.FontWeight
@@ -376,7 +381,11 @@ fun ProjectEditorScreen(
         }
     }
 
-        if (isFileSearchOpen) {
+        AnimatedVisibility(
+            visible = isFileSearchOpen,
+            enter = fadeIn(animationSpec = tween(140)),
+            exit = fadeOut(animationSpec = tween(100))
+        ) {
             FileSearchOverlay(
                 searchService = viewModel.searchService,
                 openTabPaths = openTabs.map { it.filePath },
@@ -772,14 +781,46 @@ private fun EditorSidebar(
             }
 
             // Search Bar Trigger Button
+            val searchInteractionSource = remember { MutableInteractionSource() }
+            val isSearchHovered by searchInteractionSource.collectIsHoveredAsState()
+            val searchBorderColor by animateColorAsState(
+                targetValue = if (isSearchHovered) GrimoireColors.GoldMuted else GrimoireColors.BorderBronze,
+                animationSpec = tween(120, easing = FastOutSlowInEasing),
+                label = "SidebarSearchBorder"
+            )
+            val searchBgColor by animateColorAsState(
+                targetValue = if (isSearchHovered) GrimoireColors.SurfaceHover else GrimoireColors.SurfaceCard,
+                animationSpec = tween(120, easing = FastOutSlowInEasing),
+                label = "SidebarSearchBg"
+            )
+            val searchIconRotation by animateFloatAsState(
+                targetValue = if (isSearchHovered) -10f else 0f,
+                animationSpec = tween(120, easing = FastOutSlowInEasing),
+                label = "SidebarSearchIconRot"
+            )
+            val searchIconScale by animateFloatAsState(
+                targetValue = if (isSearchHovered) 1.15f else 1f,
+                animationSpec = tween(120, easing = FastOutSlowInEasing),
+                label = "SidebarSearchIconScale"
+            )
+            val searchTextColor by animateColorAsState(
+                targetValue = if (isSearchHovered) GrimoireColors.ParchmentLight else GrimoireColors.ParchmentDim,
+                animationSpec = tween(120, easing = FastOutSlowInEasing),
+                label = "SidebarSearchText"
+            )
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 10.dp, vertical = 2.dp)
                     .clip(RoundedCornerShape(6.dp))
-                    .background(GrimoireColors.SurfaceCard)
-                    .border(1.dp, GrimoireColors.BorderBronze, RoundedCornerShape(6.dp))
-                    .clickable { onOpenSearch() }
+                    .background(searchBgColor)
+                    .border(1.dp, searchBorderColor, RoundedCornerShape(6.dp))
+                    .hoverable(searchInteractionSource)
+                    .clickable(
+                        interactionSource = searchInteractionSource,
+                        indication = null
+                    ) { onOpenSearch() }
                     .padding(horizontal = 8.dp, vertical = 6.dp)
             ) {
                 Row(
@@ -794,12 +835,18 @@ private fun EditorSidebar(
                         Text(
                             text = "🔍",
                             fontSize = 12.sp,
-                            modifier = Modifier.padding(end = 6.dp)
+                            modifier = Modifier
+                                .padding(end = 6.dp)
+                                .graphicsLayer {
+                                    rotationZ = searchIconRotation
+                                    scaleX = searchIconScale
+                                    scaleY = searchIconScale
+                                }
                         )
                         Text(
                             text = "Dateien suchen...",
                             style = MaterialTheme.typography.bodySmall,
-                            color = GrimoireColors.ParchmentDim,
+                            color = searchTextColor,
                             fontSize = 12.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
