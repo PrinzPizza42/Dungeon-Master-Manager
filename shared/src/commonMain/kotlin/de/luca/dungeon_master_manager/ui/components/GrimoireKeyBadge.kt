@@ -54,20 +54,31 @@ fun GrimoireShortcutDisplay(
     isHighlighted: Boolean = false
 ) {
     val tokens = KeybindingRegistry.parseShortcutTokens(shortcutString)
-    Row(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        tokens.forEachIndexed { index, token ->
-            GrimoireKeyBadge(keyLabel = token, isHighlighted = isHighlighted)
-            if (index < tokens.size - 1) {
-                Text(
-                    text = "+",
-                    fontSize = 11.sp,
-                    color = GrimoireColors.ParchmentDim,
-                    fontWeight = FontWeight.SemiBold
-                )
+    if (tokens.isEmpty()) {
+        Text(
+            text = "Unbound",
+            style = MaterialTheme.typography.labelSmall,
+            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+            fontSize = 11.sp,
+            color = GrimoireColors.ParchmentDim,
+            modifier = modifier
+        )
+    } else {
+        Row(
+            modifier = modifier,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            tokens.forEachIndexed { index, token ->
+                GrimoireKeyBadge(keyLabel = token, isHighlighted = isHighlighted)
+                if (index < tokens.size - 1) {
+                    Text(
+                        text = "+",
+                        fontSize = 11.sp,
+                        color = GrimoireColors.ParchmentDim,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             }
         }
     }

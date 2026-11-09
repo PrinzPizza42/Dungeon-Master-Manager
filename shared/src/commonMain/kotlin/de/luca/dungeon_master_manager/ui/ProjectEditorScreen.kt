@@ -34,6 +34,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.input.ImeAction
@@ -131,10 +132,49 @@ fun ProjectEditorScreen(
 
     val settings by AppSettingsRepository.settings.collectAsState()
     val isFileSearchOpen by viewModel.isFileSearchOpen.collectAsState()
-    val searchShortcut = settings.shortcuts[KeybindingAction.SEARCH_FILES] ?: "Ctrl+F"
+    val searchShortcut = settings.shortcuts[KeybindingAction.SEARCH_FILES]
+        ?: KeybindingRegistry.defaultShortcuts()[KeybindingAction.SEARCH_FILES]
+        ?: "Ctrl+F"
+    val toggleExplorerShortcut = settings.shortcuts[KeybindingAction.TOGGLE_EXPLORER]
+        ?: KeybindingRegistry.defaultShortcuts()[KeybindingAction.TOGGLE_EXPLORER]
+        ?: "Ctrl+B"
+    val closeTabShortcut = settings.shortcuts[KeybindingAction.CLOSE_TAB]
+        ?: KeybindingRegistry.defaultShortcuts()[KeybindingAction.CLOSE_TAB]
+        ?: "Ctrl+W"
+    val nextTabShortcut = settings.shortcuts[KeybindingAction.NEXT_TAB]
+        ?: KeybindingRegistry.defaultShortcuts()[KeybindingAction.NEXT_TAB]
+        ?: "Ctrl+Tab"
+    val prevTabShortcut = settings.shortcuts[KeybindingAction.PREV_TAB]
+        ?: KeybindingRegistry.defaultShortcuts()[KeybindingAction.PREV_TAB]
+        ?: "Ctrl+Shift+Tab"
+    val openSettingsShortcut = settings.shortcuts[KeybindingAction.OPEN_SETTINGS]
+        ?: KeybindingRegistry.defaultShortcuts()[KeybindingAction.OPEN_SETTINGS]
+        ?: "Ctrl+,"
+    val openEntitiesShortcut = settings.shortcuts[KeybindingAction.OPEN_ENTITIES]
+        ?: KeybindingRegistry.defaultShortcuts()[KeybindingAction.OPEN_ENTITIES]
+        ?: "Ctrl+E"
+    val newFileShortcut = settings.shortcuts[KeybindingAction.NEW_FILE]
+        ?: KeybindingRegistry.defaultShortcuts()[KeybindingAction.NEW_FILE]
+        ?: "Ctrl+N"
+
+    var triggerNewFileDialog by remember { mutableStateOf(0) }
+    var showEntityDialog by remember { mutableStateOf(false) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
 
     if (window != null) {
-        DisposableEffect(window, isFileSearchOpen, searchShortcut) {
+        DisposableEffect(
+            window,
+            isFileSearchOpen,
+            searchShortcut,
+            closeTabShortcut,
+            nextTabShortcut,
+            prevTabShortcut,
+            openSettingsShortcut,
+            openEntitiesShortcut,
+            newFileShortcut,
+            openTabs,
+            activeTabPath
+        ) {
             val focusListener = object : java.awt.event.WindowFocusListener {
                 override fun windowGainedFocus(e: java.awt.event.WindowEvent?) {
                     viewModel.loadFileTree()
@@ -146,8 +186,38 @@ fun ProjectEditorScreen(
             val keyDispatcher = java.awt.KeyEventDispatcher { awtEvent ->
                 if (!window.isActive) return@KeyEventDispatcher false
                 if (awtEvent.id == java.awt.event.KeyEvent.KEY_PRESSED) {
-                    if (!isFileSearchOpen && KeybindingRegistry.matchesAwtEvent(awtEvent, searchShortcut)) {
+                    if (isFileSearchOpen) return@KeyEventDispatcher false
+
+                    if (KeybindingRegistry.matchesAwtEvent(awtEvent, searchShortcut)) {
                         viewModel.openFileSearch()
+                        return@KeyEventDispatcher true
+                    }
+                    if (KeybindingRegistry.matchesAwtEvent(awtEvent, closeTabShortcut)) {
+                        activeTabPath?.let { viewModel.closeTab(it) }
+                        return@KeyEventDispatcher true
+                    }
+                    if (KeybindingRegistry.matchesAwtEvent(awtEvent, nextTabShortcut) && openTabs.size > 1) {
+                        val currentIndex = openTabs.indexOfFirst { it.filePath == activeTabPath }
+                        val nextIndex = if (currentIndex == -1) 0 else (currentIndex + 1) % openTabs.size
+                        viewModel.selectTab(openTabs[nextIndex].filePath)
+                        return@KeyEventDispatcher true
+                    }
+                    if (KeybindingRegistry.matchesAwtEvent(awtEvent, prevTabShortcut) && openTabs.size > 1) {
+                        val currentIndex = openTabs.indexOfFirst { it.filePath == activeTabPath }
+                        val prevIndex = if (currentIndex <= 0) openTabs.size - 1 else currentIndex - 1
+                        viewModel.selectTab(openTabs[prevIndex].filePath)
+                        return@KeyEventDispatcher true
+                    }
+                    if (KeybindingRegistry.matchesAwtEvent(awtEvent, openSettingsShortcut)) {
+                        showSettingsDialog = true
+                        return@KeyEventDispatcher true
+                    }
+                    if (KeybindingRegistry.matchesAwtEvent(awtEvent, openEntitiesShortcut)) {
+                        showEntityDialog = true
+                        return@KeyEventDispatcher true
+                    }
+                    if (KeybindingRegistry.matchesAwtEvent(awtEvent, newFileShortcut)) {
+                        triggerNewFileDialog++
                         return@KeyEventDispatcher true
                     }
                 }
@@ -165,7 +235,6 @@ fun ProjectEditorScreen(
     val entityViewModel = remember(viewModel.project.path) { 
         de.luca.dungeon_master_manager.viewmodel.EntityViewModel(viewModel.project.path, viewModel) 
     }
-    var showEntityDialog by remember { mutableStateOf(false) }
 
     val projectEnts by entityViewModel.projectEntities.collectAsState()
     val globalEnts by entityViewModel.globalEntities.collectAsState()
@@ -175,8 +244,6 @@ fun ProjectEditorScreen(
         list.addAll(projectEnts)
         list
     }
-
-    var showSettingsDialog by remember { mutableStateOf(false) }
 
     val coroutineScope = rememberCoroutineScope()
     var isExplorerVisible by remember(settings.isExplorerSidebarVisible) {
@@ -206,9 +273,48 @@ fun ProjectEditorScreen(
         modifier = Modifier
             .fillMaxSize()
             .onPreviewKeyEvent { event ->
-                if (!isFileSearchOpen && KeybindingRegistry.matchesShortcut(event, searchShortcut)) {
-                    viewModel.openFileSearch()
-                    return@onPreviewKeyEvent true
+                if (!isFileSearchOpen) {
+                    if (KeybindingRegistry.matchesShortcut(event, searchShortcut)) {
+                        viewModel.openFileSearch()
+                        return@onPreviewKeyEvent true
+                    }
+                    if (KeybindingRegistry.matchesShortcut(event, closeTabShortcut)) {
+                        activeTabPath?.let { viewModel.closeTab(it) }
+                        return@onPreviewKeyEvent true
+                    }
+                    if (KeybindingRegistry.matchesShortcut(event, nextTabShortcut) && openTabs.size > 1) {
+                        val currentIndex = openTabs.indexOfFirst { it.filePath == activeTabPath }
+                        val nextIndex = if (currentIndex == -1) 0 else (currentIndex + 1) % openTabs.size
+                        viewModel.selectTab(openTabs[nextIndex].filePath)
+                        return@onPreviewKeyEvent true
+                    }
+                    if (KeybindingRegistry.matchesShortcut(event, prevTabShortcut) && openTabs.size > 1) {
+                        val currentIndex = openTabs.indexOfFirst { it.filePath == activeTabPath }
+                        val prevIndex = if (currentIndex <= 0) openTabs.size - 1 else currentIndex - 1
+                        viewModel.selectTab(openTabs[prevIndex].filePath)
+                        return@onPreviewKeyEvent true
+                    }
+                    if (KeybindingRegistry.matchesShortcut(event, openSettingsShortcut)) {
+                        showSettingsDialog = true
+                        return@onPreviewKeyEvent true
+                    }
+                    if (KeybindingRegistry.matchesShortcut(event, openEntitiesShortcut)) {
+                        showEntityDialog = true
+                        return@onPreviewKeyEvent true
+                    }
+                    if (KeybindingRegistry.matchesShortcut(event, newFileShortcut)) {
+                        triggerNewFileDialog++
+                        return@onPreviewKeyEvent true
+                    }
+                }
+                false
+            }
+            .onKeyEvent { event ->
+                if (!isFileSearchOpen) {
+                    if (KeybindingRegistry.matchesShortcut(event, toggleExplorerShortcut)) {
+                        toggleExplorer()
+                        return@onKeyEvent true
+                    }
                 }
                 false
             }
@@ -278,6 +384,7 @@ fun ProjectEditorScreen(
                         onToggleCollapse = { toggleExplorer() },
                         onOpenSearch = { viewModel.openFileSearch() },
                         searchShortcut = searchShortcut,
+                        triggerNewFileDialog = triggerNewFileDialog,
                         modifier = Modifier.weight(1f).fillMaxHeight(),
                     )
 
@@ -328,7 +435,8 @@ fun ProjectEditorScreen(
                             entities = entities,
                             projectPath = viewModel.project.path,
                             targetMapMarkerId = targetMapMarkerId,
-                            onMarkerFocused = { viewModel.clearTargetMapMarkerId() }
+                            onMarkerFocused = { viewModel.clearTargetMapMarkerId() },
+                            onSave = { viewModel.saveActiveFileImmediately() }
                         )
                     }
                 } else {
@@ -672,6 +780,7 @@ private fun EditorSidebar(
     onToggleCollapse: () -> Unit = {},
     onOpenSearch: () -> Unit = {},
     searchShortcut: String = "Ctrl+F",
+    triggerNewFileDialog: Int = 0,
     modifier: Modifier = Modifier,
 ) {
     var showNewFileDialog by remember { mutableStateOf(false) }
@@ -680,6 +789,14 @@ private fun EditorSidebar(
     var fileToRename by remember { mutableStateOf<de.luca.dungeon_master_manager.data.FileNode?>(null) }
     var fileToMove by remember { mutableStateOf<de.luca.dungeon_master_manager.data.FileNode?>(null) }
     var fileToDelete by remember { mutableStateOf<de.luca.dungeon_master_manager.data.FileNode?>(null) }
+
+    LaunchedEffect(triggerNewFileDialog) {
+        if (triggerNewFileDialog > 0) {
+            newItemMode = NewItemMode.FILE
+            targetFolderForNewItem = null
+            showNewFileDialog = true
+        }
+    }
 
     var hoveredDropFolderPath by remember { mutableStateOf<String?>(null) }
     val isRootHovered = hoveredDropFolderPath == projectPath

@@ -12,23 +12,114 @@ import androidx.compose.ui.input.key.type
 
 object KeybindingAction {
     const val SEARCH_FILES = "search_files"
+    const val TOGGLE_EXPLORER = "toggle_explorer"
+    const val CLOSE_TAB = "close_tab"
+    const val NEXT_TAB = "next_tab"
+    const val PREV_TAB = "prev_tab"
+    const val OPEN_SETTINGS = "open_settings"
+    const val OPEN_ENTITIES = "open_entities"
+    const val NEW_FILE = "new_file"
+    const val SAVE_FILE = "save_file"
+    const val FORMAT_BOLD = "format_bold"
+    const val FORMAT_ITALIC = "format_italic"
+}
+
+enum class KeybindingScope(val displayName: String, val description: String) {
+    GLOBAL("Global", "Gilt anwendungsweit im Hauptfenster"),
+    EDITOR("Editor", "Gilt beim Bearbeiten von Dokumenten"),
+    EXPLORER("Explorer", "Gilt im Datei-Explorer")
 }
 
 data class KeybindingDefinition(
     val id: String,
     val title: String,
     val description: String,
-    val defaultShortcut: String
+    val defaultShortcut: String,
+    val scope: KeybindingScope = KeybindingScope.GLOBAL
 )
 
 object KeybindingRegistry {
     val ALL: List<KeybindingDefinition> = listOf(
+        // Global
         KeybindingDefinition(
             id = KeybindingAction.SEARCH_FILES,
             title = "Open file search",
             description = "Opens the global file and quick search in the project",
-            defaultShortcut = "Ctrl+F"
-        )
+            defaultShortcut = "Ctrl+F",
+            scope = KeybindingScope.GLOBAL
+        ),
+        KeybindingDefinition(
+            id = KeybindingAction.TOGGLE_EXPLORER,
+            title = "Toggle file explorer",
+            description = "Shows or hides the file explorer sidebar",
+            defaultShortcut = "Ctrl+B",
+            scope = KeybindingScope.GLOBAL
+        ),
+        KeybindingDefinition(
+            id = KeybindingAction.CLOSE_TAB,
+            title = "Close active tab",
+            description = "Closes the current document or file tab",
+            defaultShortcut = "Ctrl+W",
+            scope = KeybindingScope.GLOBAL
+        ),
+        KeybindingDefinition(
+            id = KeybindingAction.NEXT_TAB,
+            title = "Next tab",
+            description = "Switches to the next open tab",
+            defaultShortcut = "Ctrl+Tab",
+            scope = KeybindingScope.GLOBAL
+        ),
+        KeybindingDefinition(
+            id = KeybindingAction.PREV_TAB,
+            title = "Previous tab",
+            description = "Switches to the previous open tab",
+            defaultShortcut = "Ctrl+Shift+Tab",
+            scope = KeybindingScope.GLOBAL
+        ),
+        KeybindingDefinition(
+            id = KeybindingAction.OPEN_SETTINGS,
+            title = "Open settings",
+            description = "Opens the application settings dialog",
+            defaultShortcut = "Ctrl+,",
+            scope = KeybindingScope.GLOBAL
+        ),
+        KeybindingDefinition(
+            id = KeybindingAction.OPEN_ENTITIES,
+            title = "Manage entities",
+            description = "Opens the entity management dialog",
+            defaultShortcut = "Ctrl+E",
+            scope = KeybindingScope.GLOBAL
+        ),
+        KeybindingDefinition(
+            id = KeybindingAction.NEW_FILE,
+            title = "New file",
+            description = "Opens the dialog to create a new file",
+            defaultShortcut = "Ctrl+N",
+            scope = KeybindingScope.GLOBAL
+        ),
+
+        // Editor
+        KeybindingDefinition(
+            id = KeybindingAction.SAVE_FILE,
+            title = "Save document",
+            description = "Explicitly saves the active document immediately",
+            defaultShortcut = "Ctrl+S",
+            scope = KeybindingScope.EDITOR
+        ),
+        KeybindingDefinition(
+            id = KeybindingAction.FORMAT_BOLD,
+            title = "Format bold",
+            description = "Applies or removes bold formatting on selection",
+            defaultShortcut = "Ctrl+B",
+            scope = KeybindingScope.EDITOR
+        ),
+        KeybindingDefinition(
+            id = KeybindingAction.FORMAT_ITALIC,
+            title = "Format italic",
+            description = "Applies or removes italic formatting on selection",
+            defaultShortcut = "Ctrl+I",
+            scope = KeybindingScope.EDITOR
+        ),
     )
 
     fun defaultShortcuts(): Map<String, String> =
@@ -48,7 +139,9 @@ object KeybindingRegistry {
         Key.F5 to "F5", Key.F6 to "F6", Key.F7 to "F7", Key.F8 to "F8",
         Key.F9 to "F9", Key.F10 to "F10", Key.F11 to "F11", Key.F12 to "F12",
         Key.Spacebar to "Space", Key.Enter to "Enter", Key.Tab to "Tab",
-        Key.Escape to "Esc", Key.Slash to "/", Key.Backslash to "\\"
+        Key.Escape to "Esc", Key.Slash to "/", Key.Backslash to "\\",
+        Key.Comma to ",", Key.Period to ".", Key.Minus to "-", Key.Equals to "=",
+        Key.Semicolon to ";"
     )
 
     private val NAME_TO_KEY: Map<String, Key> =
@@ -66,9 +159,51 @@ object KeybindingRegistry {
     fun nameToKey(name: String): Key? = NAME_TO_KEY[name.uppercase()]
 
     fun parseShortcutTokens(shortcut: String): List<String> {
+        if (shortcut.isBlank()) return emptyList()
         return shortcut.split("+")
             .map { it.trim() }
             .filter { it.isNotEmpty() }
+    }
+
+    fun normalizeShortcut(shortcut: String): String {
+        val tokens = parseShortcutTokens(shortcut)
+        if (tokens.isEmpty()) return ""
+
+        val wantsCtrl = tokens.any { it.equals("Ctrl", true) || it.equals("Cmd", true) || it.equals("Meta", true) || it.equals("Strg", true) }
+        val wantsAlt = tokens.any { it.equals("Alt", true) }
+        val wantsShift = tokens.any { it.equals("Shift", true) }
+
+        val keyToken = tokens.lastOrNull { token ->
+            !token.equals("Ctrl", true) &&
+            !token.equals("Cmd", true) &&
+            !token.equals("Meta", true) &&
+            !token.equals("Strg", true) &&
+            !token.equals("Alt", true) &&
+            !token.equals("Shift", true)
+        } ?: return ""
+
+        val parts = mutableListOf<String>()
+        if (wantsCtrl) parts.add("Ctrl")
+        if (wantsAlt) parts.add("Alt")
+        if (wantsShift) parts.add("Shift")
+        parts.add(keyToken.uppercase())
+        return parts.joinToString("+")
+    }
+
+    fun findConflict(
+        actionId: String,
+        newShortcut: String,
+        currentShortcuts: Map<String, String>
+    ): KeybindingDefinition? {
+        val targetDef = ALL.find { it.id == actionId } ?: return null
+        val normNew = normalizeShortcut(newShortcut)
+        if (normNew.isEmpty()) return null
+
+        return ALL.firstOrNull { other ->
+            other.id != actionId &&
+            other.scope == targetDef.scope &&
+            normalizeShortcut(currentShortcuts[other.id] ?: other.defaultShortcut) == normNew
+        }
     }
 
     /**
@@ -86,7 +221,7 @@ object KeybindingRegistry {
         if (event.isAltPressed) parts.add("Alt")
         if (event.isShiftPressed) parts.add("Shift")
 
-        // Disallow bare single-character letters without modifier
+        // Disallow bare single-character letters/keys without modifier, unless it's a function key
         if (parts.isEmpty() && !keyName.startsWith("F")) {
             return null
         }
@@ -148,6 +283,13 @@ object KeybindingRegistry {
             "ENTER" -> java.awt.event.KeyEvent.VK_ENTER
             "TAB" -> java.awt.event.KeyEvent.VK_TAB
             "ESC", "ESCAPE" -> java.awt.event.KeyEvent.VK_ESCAPE
+            "," -> java.awt.event.KeyEvent.VK_COMMA
+            "." -> java.awt.event.KeyEvent.VK_PERIOD
+            "-" -> java.awt.event.KeyEvent.VK_MINUS
+            "=" -> java.awt.event.KeyEvent.VK_EQUALS
+            ";" -> java.awt.event.KeyEvent.VK_SEMICOLON
+            "/" -> java.awt.event.KeyEvent.VK_SLASH
+            "\\" -> java.awt.event.KeyEvent.VK_BACK_SLASH
             else -> null
         }
     }
@@ -204,6 +346,13 @@ object KeybindingRegistry {
             event.keyCode == java.awt.event.KeyEvent.VK_SPACE -> "Space"
             event.keyCode == java.awt.event.KeyEvent.VK_ENTER -> "Enter"
             event.keyCode == java.awt.event.KeyEvent.VK_TAB -> "Tab"
+            event.keyCode == java.awt.event.KeyEvent.VK_COMMA -> ","
+            event.keyCode == java.awt.event.KeyEvent.VK_PERIOD -> "."
+            event.keyCode == java.awt.event.KeyEvent.VK_MINUS -> "-"
+            event.keyCode == java.awt.event.KeyEvent.VK_EQUALS -> "="
+            event.keyCode == java.awt.event.KeyEvent.VK_SEMICOLON -> ";"
+            event.keyCode == java.awt.event.KeyEvent.VK_SLASH -> "/"
+            event.keyCode == java.awt.event.KeyEvent.VK_BACK_SLASH -> "\\"
             else -> null
         } ?: return null
 

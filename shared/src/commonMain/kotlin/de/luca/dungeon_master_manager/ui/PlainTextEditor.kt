@@ -37,6 +37,8 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import de.luca.dungeon_master_manager.data.AppSettingsRepository
+import de.luca.dungeon_master_manager.data.KeybindingAction
+import de.luca.dungeon_master_manager.data.KeybindingRegistry
 import de.luca.dungeon_master_manager.ui.components.EditorFontSizeControl
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -52,9 +54,13 @@ fun PlainTextEditor(
     onContentChange: (String) -> Unit,
     fileName: String,
     modifier: Modifier = Modifier,
+    onSave: (() -> Unit)? = null
 ) {
     val settings by AppSettingsRepository.settings.collectAsState()
     val fontSize = settings.editorFontSize
+    val saveShortcut = settings.shortcuts[KeybindingAction.SAVE_FILE]
+        ?: KeybindingRegistry.defaultShortcuts()[KeybindingAction.SAVE_FILE]
+        ?: "Ctrl+S"
 
     var textFieldValue by remember { mutableStateOf(TextFieldValue(content)) }
     var justCopied by remember { mutableStateOf(false) }
@@ -209,6 +215,10 @@ fun PlainTextEditor(
                         .onPreviewKeyEvent { keyEvent ->
                             if (keyEvent.type != KeyEventType.KeyDown) {
                                 return@onPreviewKeyEvent false
+                            }
+                            if (KeybindingRegistry.matchesShortcut(keyEvent, saveShortcut)) {
+                                onSave?.invoke()
+                                return@onPreviewKeyEvent true
                             }
                             val isCtrl = keyEvent.isCtrlPressed || keyEvent.isMetaPressed
                             if (isCtrl && !keyEvent.isAltPressed) {

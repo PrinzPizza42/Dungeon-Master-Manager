@@ -82,7 +82,7 @@ object AppSettingsRepository {
     fun getShortcut(actionId: String): String {
         return _settings.value.shortcuts[actionId]
             ?: KeybindingRegistry.ALL.find { it.id == actionId }?.defaultShortcut
-            ?: "Ctrl+F"
+            ?: ""
     }
 
     suspend fun setShortcut(actionId: String, shortcut: String) {
@@ -91,6 +91,19 @@ object AppSettingsRepository {
             updated[actionId] = shortcut
             current.copy(shortcuts = updated)
         }
+    }
+
+    suspend fun reassignShortcut(targetActionId: String, conflictingActionId: String, shortcut: String) {
+        updateSettings { current ->
+            val updated = current.shortcuts.toMutableMap()
+            updated[targetActionId] = shortcut
+            updated[conflictingActionId] = ""
+            current.copy(shortcuts = updated)
+        }
+    }
+
+    suspend fun clearShortcut(actionId: String) {
+        setShortcut(actionId, "")
     }
 
     suspend fun resetShortcut(actionId: String) {

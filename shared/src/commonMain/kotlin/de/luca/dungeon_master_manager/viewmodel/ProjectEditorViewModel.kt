@@ -358,6 +358,26 @@ class ProjectEditorViewModel(
         }
     }
 
+    /** Immediately flushes/writes active file content without waiting for debounce */
+    fun saveActiveFileImmediately() {
+        val activePath = _activeTabPath.value ?: return
+        val ext = activePath.substringAfterLast('.', "").lowercase()
+        if (!FileExtensions.isEditableText(ext)) return
+
+        val content = _activeFileContent.value ?: return
+        saveJob?.cancel()
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                fileService.writeFile(activePath, content)
+                if (activePath.contains("Story")) {
+                    loadFileTree()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
     fun onEntityDeleted(entityId: String) {
         loadEntityColors()
         val activePath = _activeTabPath.value

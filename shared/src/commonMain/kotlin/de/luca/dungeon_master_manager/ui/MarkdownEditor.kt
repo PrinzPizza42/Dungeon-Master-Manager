@@ -96,6 +96,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.shape.CircleShape
+import de.luca.dungeon_master_manager.data.KeybindingAction
+import de.luca.dungeon_master_manager.data.KeybindingRegistry
 import de.luca.dungeon_master_manager.data.ProjectRepository
 import de.luca.dungeon_master_manager.ui.components.EntityImageLoader
 import de.luca.dungeon_master_manager.ui.components.rememberEntityImage
@@ -113,7 +115,8 @@ fun MarkdownEditor(
     onOpenEntityPopout: (String) -> Unit = {},
     onOpenImageInTab: (String) -> Unit = {},
     projectPath: String = "",
-    entities: List<Entity> = emptyList()
+    entities: List<Entity> = emptyList(),
+    onSave: (() -> Unit)? = null
 ) {
     val settings by AppSettingsRepository.settings.collectAsState()
     val fontSize = settings.editorFontSize
@@ -527,7 +530,8 @@ fun MarkdownEditor(
                                 }
                             }
                         },
-                        onFormat = { applyFormat(it) }
+                        onFormat = { applyFormat(it) },
+                        onSave = onSave
                     )
                 }
 
@@ -643,9 +647,19 @@ private fun MarkdownEdit(
     onOpenImagePicker: () -> Unit = {},
     projectPath: String,
     focusRequester: FocusRequester,
-    onTextLayoutResult: ((TextLayoutResult, OffsetMapping) -> Unit)? = null
+    onTextLayoutResult: ((TextLayoutResult, OffsetMapping) -> Unit)? = null,
+    onSave: (() -> Unit)? = null
 ) {
     val appSettings by AppSettingsRepository.settings.collectAsState()
+    val boldShortcut = appSettings.shortcuts[KeybindingAction.FORMAT_BOLD]
+        ?: KeybindingRegistry.defaultShortcuts()[KeybindingAction.FORMAT_BOLD]
+        ?: "Ctrl+B"
+    val italicShortcut = appSettings.shortcuts[KeybindingAction.FORMAT_ITALIC]
+        ?: KeybindingRegistry.defaultShortcuts()[KeybindingAction.FORMAT_ITALIC]
+        ?: "Ctrl+I"
+    val saveShortcut = appSettings.shortcuts[KeybindingAction.SAVE_FILE]
+        ?: KeybindingRegistry.defaultShortcuts()[KeybindingAction.SAVE_FILE]
+        ?: "Ctrl+S"
     val primaryColor = GrimoireColors.GoldPrimary
     val fantasyFamily = LocalFantasyFontFamily.current
 
@@ -1021,6 +1035,19 @@ private fun MarkdownEdit(
 
                         if (keyEvent.type != KeyEventType.KeyDown) {
                             return@onPreviewKeyEvent false
+                        }
+
+                        if (KeybindingRegistry.matchesShortcut(keyEvent, boldShortcut)) {
+                            onFormat("**")
+                            return@onPreviewKeyEvent true
+                        }
+                        if (KeybindingRegistry.matchesShortcut(keyEvent, italicShortcut)) {
+                            onFormat("*")
+                            return@onPreviewKeyEvent true
+                        }
+                        if (KeybindingRegistry.matchesShortcut(keyEvent, saveShortcut)) {
+                            onSave?.invoke()
+                            return@onPreviewKeyEvent true
                         }
 
                         val key = keyEvent.key
