@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.jetbrains.skia.*
+import org.jetbrains.skia.svg.SVGDOM
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
@@ -165,10 +166,40 @@ object MapTileCacheManager {
         cacheDir.mkdirs()
         val tilesRootDir = File(cacheDir, "tiles").also { it.mkdirs() }
 
-        // Read source bytes for Skia decode
+        // Read source bytes for Skia decode (supports both raster and vector SVG)
         val sourceBytes = sourceFile.readBytes()
+        val isSvg = sourceFile.extension.lowercase() == "svg"
         val srcImage = try {
-            Image.makeFromEncoded(sourceBytes)
+            if (isSvg) {
+                val data = Data.makeFromBytes(sourceBytes)
+                val dom = SVGDOM(data)
+                val root = dom.root
+                val vb = root?.viewBox
+                val naturalW = if (vb != null && vb.width > 0f) vb.width
+                    else (root?.width?.value?.takeIf { it > 0f } ?: 1024f)
+                val naturalH = if (vb != null && vb.height > 0f) vb.height
+                    else (root?.height?.value?.takeIf { it > 0f } ?: 1024f)
+
+                // Render vector at a crisp resolution (up to 2048px on max dimension)
+                val targetDimension = 2048f
+                val scale = if (naturalW <= 0f || naturalH <= 0f) 1f else {
+                    val maxNat = maxOf(naturalW, naturalH)
+                    if (maxNat < targetDimension) targetDimension / maxNat else 1f
+                }
+                val renderW = (naturalW * scale).toInt().coerceIn(1, 4096)
+                val renderH = (naturalH * scale).toInt().coerceIn(1, 4096)
+
+                val surface = Surface.makeRasterN32Premul(renderW, renderH)
+                val canvas = surface.canvas
+                canvas.scale(scale, scale)
+                dom.setContainerSize(naturalW, naturalH)
+                dom.render(canvas)
+                val snap = surface.makeImageSnapshot()
+                surface.close()
+                snap
+            } else {
+                Image.makeFromEncoded(sourceBytes)
+            }
         } catch (e: Exception) {
             e.printStackTrace()
             flow.value = flow.value.copy(isGenerating = false)
@@ -178,7 +209,7 @@ object MapTileCacheManager {
         try {
             val origW = srcImage.width
             val origH = srcImage.height
-            val hasAlpha = srcImage.colorInfo.alphaType != ColorAlphaType.OPAQUE
+            val hasAlpha = if (isSvg) true else (srcImage.colorInfo.alphaType != ColorAlphaType.OPAQUE)
             val tileExt = if (hasAlpha) "png" else "jpg"
             val format = if (hasAlpha) EncodedImageFormat.PNG else EncodedImageFormat.JPEG
             val quality = if (hasAlpha) 100 else 90

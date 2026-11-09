@@ -355,7 +355,18 @@ fun ImageViewer(
 
                 tileState.lod0Bitmap == null -> {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(modifier = Modifier.size(36.dp))
+                        if (tileState.isGenerating) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(36.dp),
+                                color = GrimoireColors.GoldPrimary
+                            )
+                        } else {
+                            Text(
+                                "Unable to load image: $fileName",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
                     }
                 }
 
