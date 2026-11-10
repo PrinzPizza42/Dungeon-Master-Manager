@@ -23,6 +23,9 @@ compose.desktop {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "de.luca.dungeon_master_manager"
             packageVersion = "1.0.0"
+            buildTypes.release.proguard {
+                isEnabled.set(false)
+            }
 
             val iconsDir = project.file("src/main/resources/icons")
             val pngIcon = iconsDir.resolve("app_icon.png")
