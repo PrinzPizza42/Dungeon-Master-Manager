@@ -5,6 +5,9 @@ import de.luca.dungeon_master_manager.data.DefaultMarkerIcons
 import de.luca.dungeon_master_manager.ui.map.MarkerIconCache
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.skia.Data
+import org.jetbrains.skia.EncodedImageFormat
+import org.jetbrains.skia.Paint
+import org.jetbrains.skia.Rect
 import org.jetbrains.skia.Surface
 import org.jetbrains.skia.svg.SVGDOM
 import java.awt.image.BufferedImage
@@ -113,6 +116,37 @@ class MarkerIconCacheTest {
         assertNotNull(thumb)
         assertEquals(50, thumb.width)
         assertEquals(25, thumb.height)
+    }
+
+    @Test
+    fun testGetThumbnailWebpAndDownscale() = runBlocking {
+        val webpFile = File(tempDir, "test_map.webp")
+        val surface = Surface.makeRasterN32Premul(400, 200)
+        try {
+            Paint().use { paint ->
+                paint.color = 0xFF336699.toInt()
+                surface.canvas.drawRect(Rect.makeWH(400f, 200f), paint)
+            }
+            surface.makeImageSnapshot().use { snapshot ->
+                val data = snapshot.encodeToData(EncodedImageFormat.WEBP, 80)
+                assertNotNull(data, "Skia should encode WEBP test fixture")
+                data.use { webpFile.writeBytes(it.bytes) }
+            }
+        } finally {
+            surface.close()
+        }
+
+        val thumb = MarkerIconCache.getThumbnail(webpFile, 128)
+        assertNotNull(thumb, "WebP thumbnail should decode via Compose/Skia fallback")
+        assertEquals(128, thumb.width)
+        assertEquals(64, thumb.height)
+    }
+
+    @Test
+    fun testGetThumbnailCorruptFileReturnsNull() = runBlocking {
+        val corruptFile = File(tempDir, "corrupt.webp")
+        corruptFile.writeText("not a valid webp image")
+        assertNull(MarkerIconCache.getThumbnail(corruptFile, 128))
     }
 
     @Test

@@ -1,12 +1,18 @@
 package de.luca.dungeon_master_manager.ui.map
 
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asSkiaBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.res.loadImageBitmap
 import de.luca.dungeon_master_manager.data.ProjectRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jetbrains.skia.Data
+import org.jetbrains.skia.FilterMipmap
+import org.jetbrains.skia.FilterMode
+import org.jetbrains.skia.Image as SkiaImage
+import org.jetbrains.skia.MipmapMode
+import org.jetbrains.skia.Rect
 import org.jetbrains.skia.Surface
 import org.jetbrains.skia.svg.SVGDOM
 import java.awt.RenderingHints
@@ -91,24 +97,27 @@ object MarkerIconCache {
     suspend fun getThumbnail(file: File, maxDimension: Int = 128): ImageBitmap? = withContext(Dispatchers.IO) {
         val key = "${file.absolutePath}_${file.lastModified()}_$maxDimension"
         thumbnailCache[key]?.let { return@withContext it }
-        if (!file.exists()) return@withContext null
+        if (!file.exists() || !file.isFile) return@withContext null
 
-        if (isSvg(file)) {
-            val bmp = rasterizeSvg(file, maxDimension)
-            if (bmp != null) {
-                thumbnailCache[key] = bmp
-            }
-            return@withContext bmp
+        val bitmap = if (isSvg(file)) {
+            rasterizeSvg(file, maxDimension)
+        } else {
+            decodeWithImageIO(file, maxDimension) ?: decodeWithCompose(file, maxDimension)
         }
 
-        try {
-            val src = ImageIO.read(file) ?: return@withContext null
+        if (bitmap != null) {
+            thumbnailCache[key] = bitmap
+        }
+        bitmap
+    }
+
+    private fun decodeWithImageIO(file: File, maxDimension: Int): ImageBitmap? {
+        return try {
+            val src = ImageIO.read(file) ?: return null
             val w = src.width
             val h = src.height
-            if (w <= maxDimension && h <= maxDimension) {
-                val bmp = src.toComposeImageBitmap()
-                thumbnailCache[key] = bmp
-                return@withContext bmp
+            if (maxDimension <= 0 || (w <= maxDimension && h <= maxDimension)) {
+                return src.toComposeImageBitmap()
             }
 
             val scale = maxDimension.toFloat() / maxOf(w, h)
@@ -121,24 +130,52 @@ object MarkerIconCache {
                 if (src.colorModel.hasAlpha()) BufferedImage.TYPE_INT_ARGB else BufferedImage.TYPE_INT_RGB
             )
             val g2d = scaled.createGraphics()
-            g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
-            g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY)
-            g2d.drawImage(src, 0, 0, targetW, targetH, null)
-            g2d.dispose()
-
-            val bmp = scaled.toComposeImageBitmap()
-            thumbnailCache[key] = bmp
-            bmp
-        } catch (_: Exception) {
             try {
-                file.inputStream().use { stream ->
-                    val bmp = loadImageBitmap(stream)
-                    thumbnailCache[key] = bmp
-                    bmp
-                }
-            } catch (_: Exception) {
-                null
+                g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+                g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY)
+                g2d.drawImage(src, 0, 0, targetW, targetH, null)
+            } finally {
+                g2d.dispose()
             }
+
+            scaled.toComposeImageBitmap()
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun decodeWithCompose(file: File, maxDimension: Int): ImageBitmap? {
+        return try {
+            val rawBmp = file.inputStream().use { stream ->
+                loadImageBitmap(stream)
+            }
+            val maxOrig = maxOf(rawBmp.width, rawBmp.height)
+            if (maxDimension <= 0 || maxOrig <= maxDimension) {
+                return rawBmp
+            }
+
+            val scale = maxDimension.toFloat() / maxOrig
+            val targetW = (rawBmp.width * scale).toInt().coerceAtLeast(1)
+            val targetH = (rawBmp.height * scale).toInt().coerceAtLeast(1)
+
+            val skiaImage = SkiaImage.makeFromBitmap(rawBmp.asSkiaBitmap())
+            val surface = Surface.makeRasterN32Premul(targetW, targetH)
+            try {
+                surface.canvas.drawImageRect(
+                    skiaImage,
+                    Rect.makeWH(rawBmp.width.toFloat(), rawBmp.height.toFloat()),
+                    Rect.makeWH(targetW.toFloat(), targetH.toFloat()),
+                    FilterMipmap(FilterMode.LINEAR, MipmapMode.LINEAR),
+                    null,
+                    false
+                )
+                surface.makeImageSnapshot().use { it.toComposeImageBitmap() }
+            } finally {
+                surface.close()
+                skiaImage.close()
+            }
+        } catch (_: Throwable) {
+            null
         }
     }
 

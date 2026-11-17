@@ -321,6 +321,13 @@ fun EntityPopoutScreen(
                                     onOpenEntityPopout = { nestedEntityName ->
                                         onOpenEntityPopout(EntityPopoutRequest(nestedEntityName, request.projectPath))
                                     },
+                                    onOpenImageInTab = { relativeOrAbsolutePath ->
+                                        val file = resolveImageFile(relativeOrAbsolutePath, request.projectPath)
+                                        if (file != null && file.exists() && file.isFile) {
+                                            onOpenFileInMain?.invoke(file) ?: GlobalFileOpener.openFile(file)
+                                        }
+                                    },
+                                    projectPath = request.projectPath,
                                     entities = entitiesList
                                 )
                             }

@@ -71,6 +71,7 @@ import kotlin.math.sqrt
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.ui.zIndex
@@ -1052,22 +1053,38 @@ fun ImageSelector(projectPath: String, onSelect: (String) -> Unit) {
 @Composable
 fun ThumbnailImage(file: File, modifier: Modifier = Modifier) {
     var bitmap by remember(file.absolutePath, file.lastModified()) { mutableStateOf<ImageBitmap?>(null) }
+    var isLoading by remember(file.absolutePath, file.lastModified()) { mutableStateOf(true) }
 
     LaunchedEffect(file.absolutePath, file.lastModified()) {
+        isLoading = true
         bitmap = MarkerIconCache.getThumbnail(file, 128)
+        isLoading = false
     }
 
-    if (bitmap != null) {
-        Image(
-            bitmap = bitmap!!,
-            contentDescription = null,
-            modifier = modifier,
-            alignment = Alignment.Center,
-            contentScale = androidx.compose.ui.layout.ContentScale.Fit
-        )
-    } else {
-        Box(modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+    when {
+        bitmap != null -> {
+            Image(
+                bitmap = bitmap!!,
+                contentDescription = null,
+                modifier = modifier,
+                alignment = Alignment.Center,
+                contentScale = androidx.compose.ui.layout.ContentScale.Fit
+            )
+        }
+        isLoading -> {
+            Box(modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+            }
+        }
+        else -> {
+            Box(modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = Icons.Default.BrokenImage,
+                    contentDescription = "Failed to load image",
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }

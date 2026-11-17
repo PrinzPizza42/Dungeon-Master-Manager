@@ -750,6 +750,12 @@ fun StandaloneFileEditorWindow(
                 contentToSave = it 
             },
             onOpenEntityPopout = onOpenEntityPopout,
+            onOpenImageInTab = { relativeOrAbsolutePath ->
+                val file = resolveImageFile(relativeOrAbsolutePath, projectPath)
+                if (file != null && file.exists() && file.isFile) {
+                    de.luca.dungeon_master_manager.data.GlobalFileOpener.openFile(file)
+                }
+            },
             entities = entities,
             projectPath = projectPath
         )
