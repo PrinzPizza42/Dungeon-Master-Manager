@@ -10,6 +10,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -48,7 +49,9 @@ fun EditorFontSizeControl(
             ),
             shape = RoundedCornerShape(4.dp),
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-            modifier = Modifier.defaultMinSize(minWidth = 28.dp, minHeight = 30.dp)
+            modifier = Modifier
+                .defaultMinSize(minWidth = 28.dp, minHeight = 30.dp)
+                .focusProperties { canFocus = false }
         ) {
             Text("-", fontSize = 14.sp, fontWeight = FontWeight.Bold)
         }
@@ -62,7 +65,9 @@ fun EditorFontSizeControl(
                 contentColor = if (fontSize != DEFAULT_EDITOR_FONT_SIZE) GrimoireColors.GoldPrimary else GrimoireColors.ParchmentLight
             ),
             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-            modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 30.dp)
+            modifier = Modifier
+                .defaultMinSize(minWidth = 48.dp, minHeight = 30.dp)
+                .focusProperties { canFocus = false }
         ) {
             Text(
                 "${fontSize}sp",
@@ -89,7 +94,9 @@ fun EditorFontSizeControl(
             ),
             shape = RoundedCornerShape(4.dp),
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-            modifier = Modifier.defaultMinSize(minWidth = 28.dp, minHeight = 30.dp)
+            modifier = Modifier
+                .defaultMinSize(minWidth = 28.dp, minHeight = 30.dp)
+                .focusProperties { canFocus = false }
         ) {
             Text("+", fontSize = 14.sp, fontWeight = FontWeight.Bold)
         }

@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -226,6 +227,7 @@ fun MarkdownEditor(
             val newSelection = TextRange(selection.min, selection.min + unformatted.length)
             textFieldValue = TextFieldValue(newContent, newSelection)
             onContentChange(newContent)
+            try { focusRequester.requestFocus() } catch (_: Exception) {}
             return
         }
 
@@ -237,6 +239,7 @@ fun MarkdownEditor(
             val newSelection = TextRange(newBefore.length, newBefore.length + selected.length)
             textFieldValue = TextFieldValue(newContent, newSelection)
             onContentChange(newContent)
+            try { focusRequester.requestFocus() } catch (_: Exception) {}
             return
         }
         
@@ -250,6 +253,7 @@ fun MarkdownEditor(
         
         textFieldValue = TextFieldValue(newContent, newSelection)
         onContentChange(newContent)
+        try { focusRequester.requestFocus() } catch (_: Exception) {}
     }
 
     fun toggleOrInsertHeading() {
@@ -289,6 +293,7 @@ fun MarkdownEditor(
         
         textFieldValue = TextFieldValue(newText, TextRange(newCursor))
         onContentChange(newText)
+        try { focusRequester.requestFocus() } catch (_: Exception) {}
     }
 
     fun insertOrTriggerEntityLink() {
@@ -364,7 +369,10 @@ fun MarkdownEditor(
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = GrimoireColors.GoldPrimary),
                 shape = RoundedCornerShape(4.dp),
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                modifier = Modifier.padding(end = 8.dp).defaultMinSize(minHeight = 30.dp)
+                modifier = Modifier
+                    .padding(end = 8.dp)
+                    .defaultMinSize(minHeight = 30.dp)
+                    .focusProperties { canFocus = false }
             ) {
                 Text("+ Heading", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
             }
@@ -375,7 +383,10 @@ fun MarkdownEditor(
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = GrimoireColors.GoldPrimary),
                 shape = RoundedCornerShape(4.dp),
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                modifier = Modifier.padding(end = 8.dp).defaultMinSize(minHeight = 30.dp)
+                modifier = Modifier
+                    .padding(end = 8.dp)
+                    .defaultMinSize(minHeight = 30.dp)
+                    .focusProperties { canFocus = false }
             ) {
                 Text("@ Entity", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
             }
@@ -386,7 +397,10 @@ fun MarkdownEditor(
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = GrimoireColors.GoldPrimary),
                 shape = RoundedCornerShape(4.dp),
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                modifier = Modifier.padding(end = 8.dp).defaultMinSize(minHeight = 30.dp)
+                modifier = Modifier
+                    .padding(end = 8.dp)
+                    .defaultMinSize(minHeight = 30.dp)
+                    .focusProperties { canFocus = false }
             ) {
                 Text("🖼 Image", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
             }
@@ -397,7 +411,10 @@ fun MarkdownEditor(
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = GrimoireColors.ParchmentLight),
                 shape = RoundedCornerShape(4.dp),
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                modifier = Modifier.padding(end = 4.dp).defaultMinSize(minWidth = 32.dp, minHeight = 30.dp)
+                modifier = Modifier
+                    .padding(end = 4.dp)
+                    .defaultMinSize(minWidth = 32.dp, minHeight = 30.dp)
+                    .focusProperties { canFocus = false }
             ) {
                 Text("B", fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
@@ -407,7 +424,10 @@ fun MarkdownEditor(
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = GrimoireColors.ParchmentLight),
                 shape = RoundedCornerShape(4.dp),
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                modifier = Modifier.padding(end = 4.dp).defaultMinSize(minWidth = 32.dp, minHeight = 30.dp)
+                modifier = Modifier
+                    .padding(end = 4.dp)
+                    .defaultMinSize(minWidth = 32.dp, minHeight = 30.dp)
+                    .focusProperties { canFocus = false }
             ) {
                 Text("I", fontStyle = FontStyle.Italic, fontSize = 13.sp)
             }
@@ -417,7 +437,10 @@ fun MarkdownEditor(
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = GrimoireColors.ParchmentLight),
                 shape = RoundedCornerShape(4.dp),
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                modifier = Modifier.padding(end = 4.dp).defaultMinSize(minWidth = 32.dp, minHeight = 30.dp)
+                modifier = Modifier
+                    .padding(end = 4.dp)
+                    .defaultMinSize(minWidth = 32.dp, minHeight = 30.dp)
+                    .focusProperties { canFocus = false }
             ) {
                 Text("U", textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline, fontSize = 13.sp)
             }
@@ -453,7 +476,9 @@ fun MarkdownEditor(
                 ),
                 shape = RoundedCornerShape(4.dp),
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                modifier = Modifier.defaultMinSize(minHeight = 30.dp)
+                modifier = Modifier
+                    .defaultMinSize(minHeight = 30.dp)
+                    .focusProperties { canFocus = false }
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.Toc,

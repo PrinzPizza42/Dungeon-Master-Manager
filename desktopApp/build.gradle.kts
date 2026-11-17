@@ -21,8 +21,10 @@ compose.desktop {
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-            packageName = "Dungeon Master Manager"
+            packageName = "dungeon-master-manager"
             packageVersion = "1.0.1"
+            description = "Dungeon Master Manager"
+
             buildTypes.release.proguard {
                 isEnabled.set(false)
             }
@@ -34,23 +36,17 @@ compose.desktop {
 
             windows {
                 menuGroup = "Dungeon Master Manager"
-                if (icoIcon.exists()) {
-                    iconFile.set(icoIcon)
-                } else if (pngIcon.exists()) {
-                    iconFile.set(pngIcon)
-                }
+                if (icoIcon.exists()) iconFile.set(icoIcon)
+                else if (pngIcon.exists()) iconFile.set(pngIcon)
             }
             linux {
-                if (pngIcon.exists()) {
-                    iconFile.set(pngIcon)
-                }
+                shortcut = true
+                menuGroup = "DnD"
+                if (pngIcon.exists()) iconFile.set(pngIcon)
             }
             macOS {
-                if (icnsIcon.exists()) {
-                    iconFile.set(icnsIcon)
-                } else if (pngIcon.exists()) {
-                    iconFile.set(pngIcon)
-                }
+                if (icnsIcon.exists()) iconFile.set(icnsIcon)
+                else if (pngIcon.exists()) iconFile.set(pngIcon)
             }
         }
     }
